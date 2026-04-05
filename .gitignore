@@ -1,0 +1,40 @@
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Data (too large for git)
+data/
+data_qc/
+data_qc2/
+data_v5/
+
+# Logs
+*.log
+token_squeeze.log
+
+# Annotation data (per-annotator files)
+annotation_ui/annotations/*.json
+annotation_ui/sample_manifest.json
+annotation_ui/tunnel.log
+annotation_ui/server.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+data_v2/

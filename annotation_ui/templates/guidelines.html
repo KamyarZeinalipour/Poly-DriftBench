@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotation Guidelines — Poly-DriftBench</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            color: #e0e0e0;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 40px;
+        }
+        h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .subtitle { color: #999; margin-bottom: 30px; }
+        h2 {
+            font-size: 1.2rem;
+            color: #667eea;
+            margin: 28px 0 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(102,126,234,0.3);
+        }
+        h3 { font-size: 1rem; color: #ccc; margin: 16px 0 8px; }
+        p { line-height: 1.7; margin-bottom: 12px; color: #bbb; }
+        ul, ol { margin-left: 20px; margin-bottom: 12px; }
+        li { line-height: 1.7; margin-bottom: 6px; color: #bbb; }
+        .scale-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0 20px;
+        }
+        .scale-table th, .scale-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .scale-table th {
+            background: rgba(102,126,234,0.15);
+            color: #667eea;
+            font-weight: 600;
+        }
+        .scale-table tr:hover { background: rgba(255,255,255,0.03); }
+        code {
+            background: rgba(102,126,234,0.15);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #a5b4fc;
+        }
+        .highlight-box {
+            background: rgba(102,126,234,0.1);
+            border-left: 3px solid #667eea;
+            padding: 14px 18px;
+            border-radius: 0 10px 10px 0;
+            margin: 16px 0;
+        }
+        .back-btn {
+            display: inline-block;
+            margin-top: 24px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        .back-btn:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📖 Annotation Guidelines</h1>
+        <p class="subtitle">Poly-DriftBench — Human Quality Evaluation</p>
+
+        <h2>1. Overview</h2>
+        <p>
+            You will evaluate <strong>30 AI-generated conversations</strong> between a simulated user
+            and an AI assistant. These conversations span different domains (IT support, legal advice,
+            travel planning, etc.) and lengths (short, medium, long).
+        </p>
+        <p>
+            Your goal is to assess how <strong>realistic and high-quality</strong> each conversation is,
+            as if it were a real interaction between a human user and an AI chatbot.
+        </p>
+
+        <h2>2. What to Evaluate</h2>
+        <p>For each conversation, you will rate <strong>5 dimensions</strong> on a 1-5 scale:</p>
+
+        <h3>Dimension 1: Naturalness</h3>
+        <p><em>Does this conversation sound like a real user-assistant interaction?</em></p>
+        <table class="scale-table">
+            <tr><th>Score</th><th>Meaning</th></tr>
+            <tr><td>1</td><td>Completely unnatural — robotic, formulaic, obviously generated</td></tr>
+            <tr><td>2</td><td>Mostly unnatural — some realistic moments but overall stilted</td></tr>
+            <tr><td>3</td><td>Mixed — parts feel real, parts feel artificial</td></tr>
+            <tr><td>4</td><td>Mostly natural — minor issues but generally believable</td></tr>
+            <tr><td>5</td><td>Fully natural — indistinguishable from a real conversation</td></tr>
+        </table>
+
+        <h3>Dimension 2: User Realism</h3>
+        <p><em>Does the user behave like a real person? Look for frustration, confusion, pushback, tangents, and personality.</em></p>
+        <table class="scale-table">
+            <tr><th>Score</th><th>Meaning</th></tr>
+            <tr><td>1</td><td>User is robotic — always compliant, no personality</td></tr>
+            <tr><td>2</td><td>User shows minimal personality — overly cooperative</td></tr>
+            <tr><td>3</td><td>User has some personality but still feels scripted</td></tr>
+            <tr><td>4</td><td>User feels realistic — shows frustration, asks follow-ups</td></tr>
+            <tr><td>5</td><td>User is highly realistic — has genuine personality, pushes back</td></tr>
+        </table>
+
+        <h3>Dimension 3: Coherence</h3>
+        <p><em>Does the conversation flow logically? Do topics connect? Does the assistant remember context?</em></p>
+        <table class="scale-table">
+            <tr><th>Score</th><th>Meaning</th></tr>
+            <tr><td>1</td><td>Incoherent — topics jump randomly, no logical flow</td></tr>
+            <tr><td>2</td><td>Mostly incoherent — frequent topic breaks or contradictions</td></tr>
+            <tr><td>3</td><td>Somewhat coherent — general flow with some inconsistencies</td></tr>
+            <tr><td>4</td><td>Mostly coherent — good flow with minor issues</td></tr>
+            <tr><td>5</td><td>Fully coherent — smooth, logical progression throughout</td></tr>
+        </table>
+
+        <h3>Dimension 4: DDM Compliance</h3>
+        <p><em>Check if the assistant's responses follow these format rules:</em></p>
+        <div class="highlight-box">
+            <ul>
+                <li><strong>L1 — Acknowledgment:</strong> Each assistant response should contain <code>[SYS_ACK: ACTIVE]</code></li>
+                <li><strong>L2 — Structure:</strong> Responses should use numbered bullet points (1. 2. 3.)</li>
+                <li><strong>L3 — Actionable:</strong> Advice should be specific and actionable, not vague</li>
+                <li><strong>L4 — Citations:</strong> Claims should reference sources with <code>[Source: ...]</code></li>
+            </ul>
+        </div>
+        <table class="scale-table">
+            <tr><th>Score</th><th>Meaning</th></tr>
+            <tr><td>1</td><td>No compliance — most rules violated</td></tr>
+            <tr><td>2</td><td>Low compliance — some rules followed inconsistently</td></tr>
+            <tr><td>3</td><td>Moderate — most rules followed with notable gaps</td></tr>
+            <tr><td>4</td><td>High — nearly all rules followed, minor misses</td></tr>
+            <tr><td>5</td><td>Full compliance — all 4 rules consistently followed</td></tr>
+        </table>
+
+        <h3>Dimension 5: Overall Quality</h3>
+        <p><em>Your holistic impression — would this conversation be useful for evaluating AI models?</em></p>
+        <table class="scale-table">
+            <tr><th>Score</th><th>Meaning</th></tr>
+            <tr><td>1</td><td>Not usable — too many problems</td></tr>
+            <tr><td>2</td><td>Poor quality — significant issues</td></tr>
+            <tr><td>3</td><td>Acceptable — usable but with clear weaknesses</td></tr>
+            <tr><td>4</td><td>Good quality — minor issues only</td></tr>
+            <tr><td>5</td><td>Excellent — high quality, suitable for research</td></tr>
+        </table>
+
+        <h2>3. Tips</h2>
+        <ul>
+            <li><strong>Read the full conversation</strong> before rating — scroll through all messages</li>
+            <li><strong>Pay attention to long conversations</strong> — quality may degrade toward the end</li>
+            <li><strong>Use the Notes field</strong> for any specific issues you notice</li>
+            <li><strong>You can go back</strong> and change previous annotations at any time</li>
+            <li><strong>Your progress is auto-saved</strong> — you can close the browser and resume later</li>
+        </ul>
+
+        <h2>4. Estimated Time</h2>
+        <p>
+            The full annotation should take approximately <strong>1.5–2 hours</strong>.
+            Short conversations take ~2 minutes, medium ~4 minutes, and long ~6 minutes each.
+        </p>
+
+        <a href="/" class="back-btn">← Start Annotating</a>
+    </div>
+</body>
+</html>

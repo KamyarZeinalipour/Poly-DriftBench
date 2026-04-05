@@ -1,0 +1,129 @@
+# ============================================================
+# Token Squeeze Hypothesis — Master Configuration
+# ============================================================
+
+project:
+  name: "token-squeeze"
+  seed: 42
+  output_dir: "results"
+
+# --- Languages ---
+languages:
+  baseline: "en"
+  targets:
+    - code: "it"
+      name: "Italian"
+      family: "Romance"
+      deepl_code: "IT"
+    - code: "es"
+      name: "Spanish"
+      family: "Romance"
+      deepl_code: "ES"
+    - code: "fr"
+      name: "French"
+      family: "Romance"
+      deepl_code: "FR"
+    - code: "de"
+      name: "German"
+      family: "Germanic"
+      deepl_code: "DE"
+
+# --- Models ---
+models:
+  - name: "llama3-8b"
+    hf_id: "meta-llama/Meta-Llama-3-8B-Instruct"
+    attention_type: "grouped_query"
+    context_window: 8192
+  - name: "mistral-7b"
+    hf_id: "mistralai/Mistral-7B-Instruct-v0.3"
+    attention_type: "sliding_window"
+    context_window: 32768
+  - name: "qwen2-7b"
+    hf_id: "Qwen/Qwen2-7B-Instruct"
+    attention_type: "grouped_query"
+    context_window: 32768
+
+# --- Dataset ---
+dataset:
+  name: "poly-driftbench"
+  num_conversations: 100
+  min_turns: 30
+  max_turns: 50
+  domains:
+    - "it_troubleshooting"
+    - "legal_document_review"
+    - "customer_support"
+    - "travel_planning"
+    - "medical_consultation"
+    - "financial_advisory"
+    - "academic_tutoring"
+    - "recipe_instruction"
+    - "real_estate"
+    - "insurance_claims"
+
+# --- DDM Constraints (Multi-Level) ---
+ddm:
+  constraints:
+    L1_format:
+      description: "Append exact string [SYS_ACK: ACTIVE] to every response"
+      tag: "[SYS_ACK: ACTIVE]"
+      type: "regex"
+      pattern: "\\[SYS_ACK: ACTIVE\\]\\s*$"
+    L2_structure:
+      description: "Always respond using numbered bullet points"
+      type: "structural"
+      pattern: "^\\s*\\d+[\\.\\)]"
+      min_bullets: 2
+    L3_lexical:
+      description: "Never use the word 'however' in any response"
+      type: "lexical_absence"
+      forbidden_words: ["however", "However", "HOWEVER"]
+    L4_semantic:
+      description: "Always cite a source before making factual claims"
+      type: "citation"
+      pattern: "\\[Source:.*?\\]|\\(.*?\\d{4}.*?\\)|According to"
+
+# --- Expansion Strategies ---
+expansion:
+  bertscore_threshold: 0.92
+  strategies:
+    bte:
+      name: "Back-Translation Expansion"
+      intermediate_lang: "ja"    # Japanese as pivot
+      fallback_lang: "zh"        # Chinese as fallback
+    cpi:
+      name: "Controlled Paraphrastic Inflation"
+      model: "gpt-4o"
+      max_attempts: 5
+      temperature: 0.3
+    cri:
+      name: "Contextual Repetition Injection"
+      fillers:
+        - "As I mentioned earlier, "
+        - "To reiterate the key point, "
+        - "Building on what was discussed, "
+        - "To clarify and expand on this, "
+        - "It's worth emphasizing that "
+
+# --- Attention Analysis ---
+attention:
+  extract_layers: "all"       # "all" or list of layer indices
+  extract_heads: "all"        # "all" or list of head indices
+  spar_aggregation: "mean"    # "mean" or "max"
+  save_raw_weights: false     # Raw attention matrices are huge
+  save_heatmaps: true
+
+# --- Experiment Settings ---
+experiments:
+  num_runs: 5                 # Repeat each experiment N times (different seeds)
+  batch_size: 4
+  max_new_tokens: 512
+  temperature: 0.0            # Deterministic generation
+  top_p: 1.0
+  do_sample: false
+
+# --- Statistical Analysis ---
+statistics:
+  alpha: 0.05                 # Significance level
+  effect_size_method: "cohens_d"
+  regression_model: "ols"     # Ordinary Least Squares
