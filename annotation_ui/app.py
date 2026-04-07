@@ -16,11 +16,72 @@ import json
 import os
 import random
 import glob
+import markdown as md
+from markupsafe import Markup
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
+import re
+
 app = Flask(__name__)
 app.secret_key = "polydriftbench-annotation-2026-fixed-key"
+
+
+@app.template_filter('markdown')
+def markdown_filter(text):
+    """Convert markdown-like text to HTML. Forgiving parser for LLM output."""
+    import html as html_mod
+    # Escape HTML first
+    text = html_mod.escape(text)
+
+    # Bold: **text** → <strong>text</strong>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+
+    # Italic: *text* → <em>text</em>  (but not inside **)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', text)
+
+    # Inline code: `text` → <code>text</code>
+    text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
+
+    # [SYS_ACK: ACTIVE] and [Source: ...] → styled badges
+    text = re.sub(
+        r'\[SYS_ACK:\s*ACTIVE\]',
+        '<span style="background:rgba(16,185,129,0.2);color:#10b981;padding:2px 8px;border-radius:4px;font-size:0.85em;font-weight:600">&#91;SYS_ACK: ACTIVE&#93;</span>',
+        text
+    )
+    text = re.sub(
+        r'\[Source:\s*([^\]]+)\]',
+        r'<span style="background:rgba(102,126,234,0.15);color:#a5b4fc;padding:2px 8px;border-radius:4px;font-size:0.85em">&#91;Source: \1&#93;</span>',
+        text
+    )
+
+    # Process lines for lists and paragraphs
+    lines = text.split('\n')
+    result = []
+    in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+        # Numbered list item: "1. ", "2. ", etc.
+        list_match = re.match(r'^(\d+)\.\s+(.+)$', stripped)
+        if list_match:
+            if not in_list:
+                result.append('<ol start="{}">'.format(list_match.group(1)))
+                in_list = True
+            result.append('<li>{}</li>'.format(list_match.group(2)))
+        else:
+            if in_list:
+                result.append('</ol>')
+                in_list = False
+            if stripped:
+                result.append('<p>{}</p>'.format(stripped))
+            else:
+                pass  # skip empty lines
+
+    if in_list:
+        result.append('</ol>')
+
+    return Markup('\n'.join(result))
 
 # ──────────────────────────────────────────────────────────
 # Configuration

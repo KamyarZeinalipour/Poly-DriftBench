@@ -1,13 +1,15 @@
 # 🔬 Poly-DriftBench: Multilingual Context Drift Benchmark
 
 <p align="center">
-  <b>A Multi-Agent Data Factory for Measuring Instruction-Following Degradation in Long-Context Multilingual LLMs</b>
+  <b>Tokenizer Fertility as a Hidden Confounder in Multilingual Instruction Following</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Languages-EN%20%7C%20IT%20%7C%20ES%20%7C%20FR%20%7C%20DE-blue" alt="Languages">
-  <img src="https://img.shields.io/badge/Conversations-100-green" alt="Conversations">
-  <img src="https://img.shields.io/badge/Pipeline-v5--parallel--multiagent-purple" alt="Pipeline">
+  <img src="https://img.shields.io/badge/Models-12-orange" alt="Models">
+  <img src="https://img.shields.io/badge/Experiments-13-red" alt="Experiments">
+  <img src="https://img.shields.io/badge/Conversations-4%2C500-green" alt="Conversations">
+  <img src="https://img.shields.io/badge/Pipeline-v6--full--experiment-purple" alt="Pipeline">
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
 </p>
 
@@ -15,18 +17,120 @@
 
 ## 📖 Overview
 
-**Poly-DriftBench** is a research framework for studying how Large Language Models (LLMs) degrade in instruction-following ability as conversations grow longer — and how this degradation accelerates in non-English languages due to **token fertility** (more tokens per word).
+**Poly-DriftBench** is a research framework for studying how Large Language Models degrade in instruction-following ability as conversations grow longer — and how this degradation **accelerates in non-English languages** due to **token fertility** (more subword tokens per word).
 
 ### The Token Squeeze Hypothesis
 
-> *Languages with higher token fertility (e.g., Italian, German) consume more of the model's context window for the same semantic content, causing earlier onset of instruction-following drift compared to English.*
+> *Languages with higher Token Fertility Ratio (TFR) consume more of the model's context window for the same semantic content, causing earlier onset of instruction-following drift. German (TFR ≈ 1.56×) drifts faster than English (TFR = 1.0×) because the system prompt becomes a smaller fraction of the total context.*
 
-This repository provides:
-1. **A multi-agent synthetic data factory** that generates 100 high-quality, DDM-constrained conversations across 5 languages
-2. **A Drift Decay Model (DDM)** evaluation framework with 4 measurable constraint levels
-3. **Rule-based + LLM-based quality assurance** pipelines
-4. **A human annotation UI** for validating synthetic data quality
-5. **Experiment runners** for token fertility profiling, drift measurement, and mechanistic analysis
+### Key Contributions
+
+1. **Poly-DriftBench** — A parallel corpus of 4,500 DDM-constrained conversations across 5 languages and 3 length tiers
+2. **Drift Decay Model (DDM)** — A 4-level constraint evaluation framework with continuous scoring, AUC, half-life, and bootstrap CIs
+3. **13 experiments** spanning GPU inference, analytical, and mechanistic analysis across 12 open-source models
+4. **Token Squeeze Proof** — Paraphrastic control experiment isolating tokenizer fertility as the causal factor
+
+---
+
+## 🧪 The 13-Experiment Pipeline
+
+### GPU-Heavy Experiments (Model Inference)
+
+| # | Experiment | Description | Key Metric |
+|---|-----------|-------------|------------|
+| 1 | **Token Fertility Profiling** | Compute TFR(L) = tokens(L) / tokens(EN) for all model × language pairs | TFR per language |
+| 2 | **Baseline Drift Measurement** | Run inference on all conversations, evaluate DDM decay curves | DOP, AUC, τ½ |
+| 3 | **Paraphrastic Control** | Expand English to match non-EN token counts via CRI, compare drift | Drift curve overlap |
+| 5 | **SPAR Attention Analysis** | Extract attention weights, compute System Prompt Attention Ratio | SPAR decay curve |
+| 6 | **System Prompt Re-injection** | Re-inject instructions at turns 15/30/50, measure DDM recovery | Recovery boost |
+| 7 | **Context Budget Analysis** | Track DDM vs context window utilization (%), not turn number | Critical utilization % |
+| 8 | **Perplexity at Drift Onset** | Measure model certainty when instructions start to degrade | Confident vs confused drift |
+
+### Analytical Experiments (Post-Processing)
+
+| # | Experiment | Description | Statistical Test |
+|---|-----------|-------------|-----------------|
+| 4 | **Regression Analysis** | Fit DOP = β₀ + β₁ × TFR + ε | OLS, p-value on β₁ |
+| 9 | **Drift Velocity** | Rate of DDM decay (ΔDDM/Δturn), rolling window | ANOVA across languages |
+| 10 | **Cross-Model Consistency** | Do all 12 models rank languages in the same drift order? | Kendall's W concordance |
+| 11 | **Tier Effect Analysis** | Compare drift across short/medium/long tiers | Kruskal-Wallis, Cohen's d |
+| 12 | **Per-Level Failure Ordering** | Which DDM constraint (L1–L4) fails first per language? | Chi-squared independence |
+
+### Mechanistic Experiment
+
+| # | Experiment | Description | Key Metric |
+|---|-----------|-------------|------------|
+| 13 | **Token Position Analysis** | System prompt's relative position in context as conversations grow | Ratio at DOP |
+
+---
+
+## 📊 The DDM (Drift Decay Model)
+
+### 4 Constraint Levels
+
+| Level | Constraint | What It Measures | Scoring |
+|-------|-----------|-----------------|---------|
+| **L1** | `[SYS_ACK: ACTIVE]` canary tag | Basic instruction retention | Binary (with/without brackets) |
+| **L2** | Numbered bullet points (1. 2. 3.) | Format compliance | Continuous (0–1, partial credit) |
+| **L3** | Forbidden word ban ("however" + per-language lists) | Lexical constraint adherence | Binary per language |
+| **L4** | `[Source: ...]` or "According to..." citations | Citation retention | Binary with strict mode |
+
+### Enhanced Metrics
+
+| Metric | Definition | Use |
+|--------|-----------|-----|
+| **DDM Score** | Mean of L1–L4 per turn (0.0–1.0) | Turn-level compliance |
+| **DOP** (Drift Onset Point) | First turn where DDM < 1.0 | When drift starts |
+| **sDOP** (Sustained DOP) | First turn where DDM stays below 1.0 for 3+ turns | Robust onset detection |
+| **τ½** (Half-Life) | Turn where DDM first drops ≤ 0.5 | Severity measure |
+| **AUC** | Area Under the DDM curve (0–1) | Overall conversation quality |
+| **Recovery Rate** | % of turns that improve after a decline | Model self-correction ability |
+| **95% Bootstrap CI** | Confidence intervals on all aggregated metrics | Statistical rigor |
+
+### L3 Forbidden Words (Per-Language)
+
+| Language | Forbidden Words |
+|----------|----------------|
+| EN | however |
+| IT | tuttavia, comunque, però |
+| ES | sin embargo, no obstante |
+| FR | cependant, toutefois, néanmoins |
+| DE | jedoch, allerdings, dennoch |
+
+---
+
+## 📁 Dataset: 3-Tier Length Strategy
+
+| Tier | Conversations | Turns/Conv | ~Context Length | Purpose |
+|------|:---:|:---:|:---:|------------|
+| **Short** | 25 | 10–15 | ~5K–8K tokens | Control — minimal drift expected |
+| **Medium** | 25 | 30–50 | ~12K–20K tokens | Drift onset zone |
+| **Long** | 25 | 80–120 | ~30K–50K tokens | Deep drift — maximum effect |
+
+**Total: 75 conversations × 5 languages = 375 parallel conversation sets**  
+**Total inference: 12 models × 375 = 4,500 evaluated conversations**
+
+### 9 Conversation Domains
+IT Troubleshooting · Legal Document Review · Customer Support · Travel Planning · Medical Consultation · Financial Advisory · Academic Tutoring · Recipe Instruction · Real Estate · Insurance Claims
+
+---
+
+## 🤖 12 Models Under Evaluation
+
+| Model | Parameters | Architecture | Context Window |
+|-------|:---------:|:----------:|:-------------:|
+| LLaMA 3.1 8B Instruct | 8B | GQA | 131K |
+| LLaMA 3.2 3B Instruct | 3B | GQA | 131K |
+| LLaMA 3.2 1B Instruct | 1B | GQA | 131K |
+| Mistral 7B Instruct v0.3 | 7B | SWA | 32K |
+| Mistral Nemo 12B | 12B | SWA | 131K |
+| Mistral Small 24B | 24B | SWA | 32K |
+| Qwen 2.5 3B Instruct | 3B | GQA | 32K |
+| Qwen 2.5 7B Instruct | 7B | GQA | 32K |
+| Qwen 2.5 14B Instruct | 14B | GQA | 32K |
+| Qwen 2.5 32B Instruct | 32B | GQA | 32K |
+| Gemma 2 9B IT | 9B | GQA | 8K |
+| Phi 3.5 Mini | 3.8B | GQA | 128K |
 
 ---
 
@@ -56,39 +160,29 @@ This repository provides:
          └─────────────────────────────────────────────────────────────┘
 ```
 
-### The DDM (Drift Decay Model) — 4 Constraint Levels
+### Experiment Pipeline Architecture
 
-| Level | Constraint | What It Measures | Detection |
-|-------|-----------|-----------------|-----------|
-| **L1** | `[SYS_ACK: ACTIVE]` tag in every response | Basic instruction retention | Binary (present/absent) |
-| **L2** | Numbered bullet points (1. 2. 3.) | Format compliance | Regex count |
-| **L3** | Actionable, specific advice | Content quality | Semantic check |
-| **L4** | `[Source: ...]` citations | Detail retention | Regex match |
-
-The `[SYS_ACK: ACTIVE]` tag is a **canary token** — a meaningless format marker that the model must maintain. When models start dropping it, that's the measurable signal of context drift.
-
----
-
-## 📊 Dataset: 3-Tier Length Strategy
-
-| Tier | Conversations | Turns | ~Context Length | Purpose |
-|------|:---:|:---:|:---:|---------|
-| **Short** | 25 | 10-15 | ~5K-8K tokens | Control — no drift expected |
-| **Medium** | 50 | 30-50 | ~12K-20K tokens | Drift onset zone |
-| **Long** | 25 | 80-120 | ~30K-50K tokens | Deep drift — the money shot |
-
-**Total: 100 conversations × 5 languages = 500 parallel corpora**
-
-### Domains
-- IT Troubleshooting
-- Legal Document Review
-- Customer Support
-- Travel Planning
-- Medical Consultation
-- Financial Advisory
-- Academic Tutoring
-- Recipe Instruction
-- Real Estate
+```
+Phase 1: Token Fertility (CPU)          Phase 2: GPU Inference
+┌─────────────────────┐                 ┌──────────────────────────┐
+│  Exp 1: Fertility   │                 │  Exp 2: Drift Baseline   │
+│  12 models × 5 langs│                 │  ┌──────────┐            │
+│  TFR computation    │     ┌──────────▶│  │ Model    │ inference  │
+└─────────┬───────────┘     │           │  │ Manager  │──▶ DDM     │
+          │                 │           │  └──────────┘   Evaluate  │
+          │    ┌────────────┘           │  Also: Exp 7, 8, 13      │
+          │    │ GPU 2 + GPU 3          └───────────┬──────────────┘
+          │    │ parallel                           │
+          ▼    │                        ┌───────────▼──────────────┐
+Phase 3: Analytical                     │  Exp 3: Paraphrastic     │
+┌─────────────────────┐                 │  Exp 5: SPAR Attention   │
+│  Exp 4:  Regression │                 │  Exp 6: Re-injection     │
+│  Exp 9:  Velocity   │                 └──────────────────────────┘
+│  Exp 10: Cross-Model│
+│  Exp 11: Tier Effect│
+│  Exp 12: Level Order│
+└─────────────────────┘
+```
 
 ---
 
@@ -97,57 +191,56 @@ The `[SYS_ACK: ACTIVE]` tag is a **canary token** — a meaningless format marke
 ### 1. Setup
 
 ```bash
-# Clone
 git clone https://github.com/KamyarZeinalipour/Poly-DriftBench.git
 cd Poly-DriftBench
 
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Configure API keys
-cp .env.example .env
-# Edit .env with your DEEPSEEK_API_KEY
+# For GPU experiments
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install accelerate
 ```
 
-### 2. Generate Data
+### 2. Run Experiments
 
 ```bash
-# Quick test (2 conversations, 5 turns each)
-python -m src.cli produce --num 2 --output data/test
+# Dry run (2 conversations per tier — verify pipeline)
+CUDA_VISIBLE_DEVICES=0 python scripts/run_full_experiment.py --dry-run
 
-# Full production (100 conversations, 3-tier strategy)
+# Full single-GPU experiment
+CUDA_VISIBLE_DEVICES=0 python scripts/run_full_experiment.py
+
+# Multi-GPU (2x speedup — split models across GPUs)
+tmux new-session -d -s gpu2 "PYTHONPATH=. python scripts/run_multi_gpu.py --gpu 2"
+tmux new-session -d -s gpu3 "PYTHONPATH=. python scripts/run_multi_gpu.py --gpu 3"
+
+# After both GPUs finish — merge results and run analytical experiments
+python scripts/merge_and_analyze.py
+
+# Run specific experiments only
+python scripts/run_full_experiment.py --experiments 9 10 11 12
+
+# Analytical-only (skip GPU experiments, use existing data)
+python scripts/run_full_experiment.py --skip-gpu
+```
+
+### 3. Generate Data (if needed)
+
+```bash
+# Full production (100 conversations, 3-tier, 5 languages)
 python scripts/run_production.py --parallel 3 --output data/production
 
-# English only (no translation)
-python -m src.cli produce --num 10 --no-translate --output data/en_only
-```
-
-### 3. Run Experiments
-
-```bash
-# Token fertility profiling
-python -m src.cli fertility --data-dir data/production
-
-# Drift measurement
-python -m src.cli drift --data-dir data/production
-
-# Full pipeline
-python -m src.cli run-all --data-dir data/production
+# Quick test
+python -m src.cli produce --num 2 --output data/test
 ```
 
 ### 4. Human Annotation
 
 ```bash
-# Start the annotation UI
-cd annotation_ui
-pip install flask gunicorn
-bash start.sh
-
-# Access at the Cloudflare URL shown in the terminal
+cd annotation_ui && bash start.sh
+# Accessible via Cloudflare tunnel
 ```
 
 ---
@@ -157,155 +250,150 @@ bash start.sh
 ```
 Poly-DriftBench/
 ├── configs/
-│   └── default.yaml              # Experiment configuration
+│   └── default.yaml                    # Models, languages, experiment config
 ├── src/
-│   ├── cli.py                    # CLI entry point
+│   ├── cli.py                          # CLI entry point (produce, fertility, drift, run-all)
 │   ├── data_gen/
-│   │   ├── agents.py             # 9 specialized agents + PipelineStats
-│   │   ├── pipeline.py           # DataFactory orchestrator
-│   │   ├── validators.py         # Rule-based DDM + translation validators
-│   │   └── seed_generator.py     # Domain templates + seed generation
+│   │   ├── agents.py                   # 9 specialized agents + PipelineStats
+│   │   ├── pipeline.py                 # DataFactory orchestrator
+│   │   ├── validators.py              # Rule-based DDM + translation validators
+│   │   └── seed_generator.py          # Domain templates + seed generation
 │   ├── evaluation/
-│   │   └── ddm.py                # DDM scoring engine
+│   │   └── ddm.py                      # DDM scoring (L1–L4, AUC, τ½, sDOP, CI95)
 │   ├── experiments/
-│   │   └── runner.py             # Experiment runner (fertility, drift, SPAR)
+│   │   ├── runner.py                   # Master 13-experiment orchestrator
+│   │   ├── inference.py                # GPU model manager + conversation inference
+│   │   ├── exp6_reinjection.py         # Exp 6: System prompt re-injection
+│   │   ├── exp7_context_budget.py      # Exp 7: Context budget analysis
+│   │   ├── exp8_perplexity.py          # Exp 8: Perplexity at drift onset
+│   │   ├── exp9_drift_velocity.py      # Exp 9: Drift velocity analysis
+│   │   ├── exp10_cross_model.py        # Exp 10: Cross-model consistency
+│   │   ├── exp11_tier_effect.py        # Exp 11: Tier effect analysis
+│   │   ├── exp12_level_ordering.py     # Exp 12: Per-level failure ordering
+│   │   └── exp13_token_position.py     # Exp 13: Token position analysis
 │   ├── tokenizer/
-│   │   └── fertility.py          # Token fertility computation
+│   │   └── fertility.py                # Token Fertility Ratio computation
 │   ├── expansion/
-│   │   └── strategies.py         # Paraphrastic expansion (BTE, CPI, CRI)
+│   │   └── strategies.py               # Paraphrastic expansion (BTE, CPI, CRI)
 │   ├── attention/
-│   │   └── spar.py               # SPAR attention analysis
+│   │   └── spar.py                     # SPAR attention analysis module
 │   └── visualization/
-│       └── plots.py              # Result visualization
+│       └── plots.py                    # Result visualization
 ├── scripts/
-│   └── run_production.py         # 3-tier production runner
+│   ├── run_full_experiment.py          # Single-GPU full pipeline
+│   ├── run_multi_gpu.py                # Multi-GPU parallel experiment
+│   ├── merge_and_analyze.py            # Merge GPU results + analytical experiments
+│   └── run_production.py              # Data generation pipeline
 ├── annotation_ui/
-│   ├── app.py                    # Flask annotation server
-│   ├── start.sh                  # Server + Cloudflare tunnel launcher
-│   └── templates/                # Login, guidelines, annotation UI
+│   ├── app.py                          # Flask annotation server
+│   ├── start.sh                        # Server + Cloudflare tunnel
+│   └── templates/                      # Login, guidelines, annotation pages
 ├── data/
 │   └── production/
-│       ├── short/                # 25 short conversations (10-15 turns)
-│       ├── medium/               # 50 medium conversations (30-50 turns)
-│       ├── long/                 # 25 long conversations (80-120 turns)
-│       └── production_summary.json
+│       ├── short/parallel/{en,it,es,fr,de}/    # 25 × 5 short conversations
+│       ├── medium/parallel/{en,it,es,fr,de}/   # 25 × 5 medium conversations
+│       └── long/parallel/{en,it,es,fr,de}/     # 25 × 5 long conversations
+├── results/                            # Experiment outputs
+│   ├── fertility/                      # TFR ratios (CSV, JSON)
+│   ├── drift_curves/                   # Per-turn DDM scores, summaries
+│   ├── paraphrastic/                   # Expansion control results
+│   ├── attention_maps/                 # SPAR profiles (JSON)
+│   ├── reinjection/                    # Re-injection recovery
+│   ├── context_budget/                 # Context utilization analysis
+│   ├── perplexity/                     # PPL at drift onset
+│   ├── regression/                     # TFR → DOP regression
+│   ├── drift_velocity/                 # Velocity analysis + ANOVA
+│   ├── cross_model/                    # Kendall's W + pairwise τ
+│   ├── tier_effect/                    # Short vs Medium vs Long
+│   ├── level_ordering/                 # L1–L4 failure cascade
+│   └── token_position/                # System prompt ratio analysis
 ├── requirements.txt
-├── .env.example
 └── README.md
 ```
 
 ---
 
-## 🔧 Pipeline Details
+## 📈 Preliminary Results
 
-### 9 Specialized Agents
+### Token Fertility Ratios (Exp 1)
 
-| Agent | Role | Calls/Conv |
-|-------|------|:---:|
-| **ScenarioArchitect** | Plans conversation arc, persona, emotional trajectory | 1 |
-| **UserSimulator** | Generates realistic user messages with personality, pushback | N |
-| **AssistantSimulator** | Generates DDM-compliant responses | N + rewrites |
-| **QualityAuditor** | Scores quality, requests rewrites | 1-3 rounds |
-| **ConversationValidator** | Rule-based DDM constraint checking (deterministic) | per round |
-| **TranslatorAgent** | Initial translation to target language | N × 4 langs |
-| **TranslationReviewerAgent** | Format preservation + naturalness review | N × 4 langs |
-| **BackTranslatorAgent** | Semantic fidelity verification via back-translation | N × 4 langs |
-| **TranslationValidator** | Rule-based format marker preservation check | per language |
+| Language | Mean TFR | Overhead | Highest Model | Lowest Model |
+|----------|:--------:|:--------:|:-------------:|:------------:|
+| English | 1.000 | — | — | — |
+| Spanish | 1.373 | +37.3% | Qwen 2.5 (1.37) | Gemma 2 (1.12) |
+| Italian | 1.525 | +52.5% | LLaMA 3.1 (1.53) | Gemma 2 (1.23) |
+| French | 1.496 | +49.6% | LLaMA 3.1 (1.51) | Gemma 2 (1.29) |
+| German | 1.563 | +56.3% | LLaMA 3.1 (1.58) | Gemma 2 (1.25) |
 
-### 3-Level Parallelism
+### Drift Measurement (Exp 2 — In Progress)
 
-```
-Level 1: Multiple conversations generate simultaneously (--parallel 3)
-Level 2: All 4 target languages translate in parallel per conversation
-Level 3: Up to 10 messages translate in parallel per language
-```
-
-### Comprehensive Metadata Tracking
-
-Every generated conversation includes paper-ready metadata:
-
-```json
-{
-  "metadata": {
-    "pipeline_stats": {
-      "api_calls_total": 937,
-      "tokens": { "prompt": 650000, "completion": 210000, "total": 860000 },
-      "agent_activations": {
-        "ScenarioArchitect": 1,
-        "UserSimulator": 40,
-        "AssistantSimulator": 120,
-        "TranslatorAgent": 320,
-        "BackTranslatorAgent": 320
-      },
-      "generation": {
-        "ddm_violations_found": 3,
-        "ddm_violations_auto_fixed": 3,
-        "revision_rounds": 2
-      },
-      "translation": {
-        "messages_translated": 320,
-        "format_issues_force_fixed": 0,
-        "low_fidelity_retries": 0
-      },
-      "phase_timings_seconds": {
-        "planning": 5.2,
-        "generation": 45.1,
-        "audit_and_revise": 30.5,
-        "translation": 22.3
-      }
-    }
-  }
-}
-```
+| Signal | Observation |
+|--------|-------------|
+| L1 (Canary) | Most frequently retained — easiest constraint |
+| L3 (Forbidden words) | Drops earliest — models use "however" by turn 2 |
+| L4 (Citations) | Drops alongside L3 — models stop citing sources |
+| Short tier | Minimal cross-lingual difference (control ✓) |
+| Medium tier | Italian shows lower AUC than English (0.694 vs 0.713) |
 
 ---
 
-## 📈 Production Statistics
+## 🔧 Environment & Infrastructure
 
-| Metric | Value |
-|--------|------:|
-| Total Conversations | 100 |
-| Total Languages | 5 (EN, IT, ES, FR, DE) |
-| Total API Calls | 114,137 |
-| Total Tokens | 115M |
-| DDM Compliance | 100% |
-| Quality Score (mean) | 7.74/10 |
-| Approved Rate | 100% |
-| Production Time | 6.6 hours |
-| Estimated Cost | ~$80 (DeepSeek-V3) |
+### Hardware
+- 4× NVIDIA RTX A6000 (49 GB each)
+- Multi-GPU parallelism: models split across GPUs
 
----
+### Software
+- Python 3.10+
+- PyTorch 2.5+ with CUDA 12.1
+- Transformers (HuggingFace) with offline mode
+- Models cached locally at `HF_HUB_CACHE`
 
-## 📝 Human Evaluation
-
-A web-based annotation UI is included for human validation of the generated data.
-
-**Features:**
-- Name-based login (no password)
-- Per-annotator JSON files for persistence
-- Resume from last annotated conversation
-- Navigate back/forward to change annotations
-- Comprehensive annotation guidelines
-- 5 rating dimensions (1-5 Likert scale):
-  - Naturalness, User Realism, Coherence, DDM Compliance, Overall Quality
-
-**Deployment:**
+### Key Environment Variables
 ```bash
-cd annotation_ui && bash start.sh
-# Publicly accessible via Cloudflare tunnel
+export HF_HUB_CACHE=/path/to/hf_cache/hub
+export TRANSFORMERS_OFFLINE=1
+export CUDA_VISIBLE_DEVICES=2,3
+export PYTHONPATH=/path/to/Poly-DriftBench
 ```
 
 ---
 
-## 🧪 Planned Experiments
+## 📝 Human Evaluation Plan
 
-| # | Experiment | Description |
-|---|-----------|-------------|
-| 1 | **Token Fertility Profiling** | Measure tokens/word ratio across languages using LLaMA/Mistral/Qwen tokenizers |
-| 2 | **Baseline Drift Measurement** | Feed conversations to models, track DDM score decay per language |
-| 3 | **Paraphrastic Expansion** | Expand English to match non-English token counts, isolate fertility effect |
-| 4 | **Activation Patching** | Identify critical attention heads for instruction retention |
-| 5 | **SPAR Analysis** | Sparse probing of attention patterns at drift onset points |
+### Validation Tasks
+
+| Task | Samples | Annotators | Purpose |
+|------|---------|-----------|---------|
+| **Translation Quality** | 50 × 5 langs | 1 native/lang | Verify parallel corpus equivalence |
+| **DDM Agreement** | 100 responses | 3 annotators | Human-DDM score correlation |
+| **Drift Impact** | 50 early/late pairs | 3 annotators | Does DDM decline = worse quality? |
+
+### Annotation Dimensions
+- Naturalness (1-5)
+- User Realism (1-5)
+- Coherence (1-5)
+- DDM Compliance — L1/L2/L3/L4 (binary each)
+- Overall Quality (1-5)
+
+### Inter-Annotator Agreement
+Target: Krippendorff's α ≥ 0.80 for all constraint levels.
+
+---
+
+## 📊 Statistical Methods
+
+| Test | Used In | Purpose |
+|------|---------|---------|
+| OLS Regression | Exp 4 | DOP = β₀ + β₁ × TFR + ε |
+| One-way ANOVA | Exp 9 | Drift velocity differences across languages |
+| Kendall's W | Exp 10 | Cross-model ranking concordance |
+| Kendall's τ | Exp 10 | Pairwise model rank correlation |
+| Kruskal-Wallis | Exp 11 | Non-parametric tier effect |
+| Cohen's d | Exp 11 | Effect size between tiers |
+| Chi-squared | Exp 12 | Failure ordering × language independence |
+| Pearson r | Exp 8, 13 | DDM-perplexity / DDM-position correlation |
+| Bootstrap CI | All | 95% confidence intervals (n=1000) |
 
 ---
 
@@ -313,9 +401,10 @@ cd annotation_ui && bash start.sh
 
 ```bibtex
 @article{zeinalipour2026polydriftbench,
-  title={Poly-DriftBench: A Multilingual Benchmark for Measuring 
-         Instruction-Following Drift in Long-Context LLMs},
+  title={Poly-DriftBench: Tokenizer Fertility as a Hidden Confounder 
+         in Multilingual Instruction Following},
   author={Zeinalipour, Kamyar},
+  journal={Proceedings of EMNLP},
   year={2026}
 }
 ```
@@ -331,4 +420,5 @@ This project is licensed under the MIT License.
 ## 🙏 Acknowledgments
 
 - **DeepSeek** — V3 model used for data generation and translation
+- **Meta, Mistral AI, Alibaba, Google, Microsoft** — Open-source models used for evaluation
 - Built with the multi-agent orchestration paradigm for synthetic data quality assurance

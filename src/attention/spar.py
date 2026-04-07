@@ -99,7 +99,7 @@ class SPARAnalyzer:
         )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            torch_dtype=self.dtype,
+            dtype=self.dtype,
             device_map=self.device,
             trust_remote_code=True,
             attn_implementation="eager",  # Need eager for attention weights

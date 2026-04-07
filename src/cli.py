@@ -200,7 +200,7 @@ def sample(ctx):
     click.echo("🧪 Running sample evaluation...")
 
     conv = create_sample_conversation()
-    evaluator = DDMEvaluator(ctx.obj["config"])
+    evaluator = DDMEvaluator(ctx.obj["config"], language="en")
 
     # Extract assistant responses
     responses = [
@@ -217,15 +217,28 @@ def sample(ctx):
     click.echo(f"\n📋 Sample Conversation: {conv['id']}")
     click.echo(f"   Domain: {conv['domain']}")
     click.echo(f"   Turns evaluated: {result.total_turns}")
-    click.echo(f"   Mean DDM: {result.mean_ddm:.3f}")
-    click.echo(f"   Drift Onset Point: {result.drift_onset_point}")
+    click.echo(f"   ── Core Metrics ──")
+    click.echo(f"   Mean DDM:           {result.mean_ddm:.3f} ± {result.std_ddm:.3f}")
+    click.echo(f"   AUC:                {result.auc:.3f}")
+    click.echo(f"   Drift Onset (DOP):  {result.drift_onset_point}")
+    click.echo(f"   Sustained DOP (k=3):{result.sustained_dop}")
+    click.echo(f"   Half-Life (τ½):     {result.half_life}")
+    click.echo(f"   Total Collapse:     {result.total_collapse_point}")
+    click.echo(f"   Recovery Rate:      {result.recovery_rate:.2%}")
+    click.echo(f"   ── Per-Level Decay ──")
+    for level, decay in result.per_level_decay.items():
+        click.echo(
+            f"   {level:15s}: mean={decay.mean_score:.3f}  "
+            f"AUC={decay.auc:.3f}  onset={decay.decay_onset}"
+        )
+    click.echo(f"   ── Turn-by-Turn ──")
 
     for tr in result.turn_results:
         status = "✅" if tr.all_pass else "⚠️"
         click.echo(
-            f"   {status} Turn {tr.turn_number}: DDM={tr.ddm_score:.2f} "
-            f"[L1={'✓' if tr.l1_pass else '✗'} L2={'✓' if tr.l2_pass else '✗'} "
-            f"L3={'✓' if tr.l3_pass else '✗'} L4={'✓' if tr.l4_pass else '✗'}]"
+            f"   {status} Turn {tr.turn_number}: DDM={tr.ddm_score:.3f} "
+            f"[L1={tr.l1_score:.1f} L2={tr.l2_score:.2f} "
+            f"L3={tr.l3_score:.1f} L4={tr.l4_score:.1f}]"
         )
 
 

@@ -70,19 +70,63 @@ class FertilityProfiler:
         self._load_tokenizers()
 
     def _load_tokenizers(self):
-        """Load all tokenizers (lightweight, no GPU needed)."""
+        """Load all tokenizers from local cache (lightweight, no GPU needed)."""
         for cfg in self.model_configs:
             name = cfg["name"]
             hf_id = cfg["hf_id"]
             logger.info(f"Loading tokenizer: {name} ({hf_id})")
             try:
-                self.tokenizers[name] = AutoTokenizer.from_pretrained(
-                    hf_id, trust_remote_code=True
-                )
+                # Try to resolve local snapshot path first (handles gated repos)
+                local_path = self._resolve_local_snapshot(hf_id)
+                if local_path:
+                    logger.info(f"  Using local snapshot: {local_path}")
+                    self.tokenizers[name] = AutoTokenizer.from_pretrained(
+                        str(local_path),
+                        trust_remote_code=True,
+                    )
+                else:
+                    self.tokenizers[name] = AutoTokenizer.from_pretrained(
+                        hf_id,
+                        trust_remote_code=True,
+                        local_files_only=True,
+                    )
                 logger.info(f"  Vocab size: {self.tokenizers[name].vocab_size}")
             except Exception as e:
                 logger.error(f"Failed to load tokenizer {name}: {e}")
                 raise
+
+    @staticmethod
+    def _resolve_local_snapshot(hf_id: str) -> Path | None:
+        """
+        Resolve a HuggingFace model ID to a local cache snapshot directory.
+        
+        Searches common HF cache locations for the model's snapshot.
+        """
+        import os
+        # Convert 'org/model-name' → 'models--org--model-name'
+        cache_dir_name = "models--" + hf_id.replace("/", "--")
+        
+        # Search locations in priority order
+        cache_roots = [
+            os.environ.get("HF_HUB_CACHE"),
+            os.environ.get("HF_HOME", "") and os.path.join(os.environ.get("HF_HOME", ""), "hub"),
+            "/home4/kamyar/italian_detox/hf_cache/hub",
+            os.path.expanduser("~/.cache/huggingface/hub"),
+        ]
+        
+        for root in cache_roots:
+            if not root:
+                continue
+            model_dir = Path(root) / cache_dir_name / "snapshots"
+            if model_dir.exists():
+                # Use the most recent snapshot (or only one)
+                snapshots = sorted(model_dir.iterdir())
+                if snapshots:
+                    snap = snapshots[-1]
+                    # Verify it has tokenizer files
+                    if (snap / "tokenizer_config.json").exists() or (snap / "tokenizer.json").exists():
+                        return snap
+        return None
 
     def count_tokens(self, text: str, model_name: str) -> int:
         """Count tokens for a given text using a specific model's tokenizer."""
@@ -219,32 +263,51 @@ def load_parallel_texts(data_dir: str | Path) -> dict[str, list[str]]:
     """
     Load parallel texts from the data directory structure.
 
-    Expects:
-        data_dir/
-            parallel/
-                en/ *.jsonl
-                it/ *.jsonl
-                es/ *.jsonl
-                ...
+    Supports two layouts:
+      1) Flat:   data_dir/parallel/{en,it,...}/*.jsonl
+      2) Tiered: data_dir/{short,medium,long}/parallel/{en,it,...}/*.jsonl
 
     Each JSONL file contains one JSON object per line with a "text" field.
     """
     data_dir = Path(data_dir)
-    parallel_dir = data_dir / "parallel"
-    parallel_data = {}
+    parallel_data: dict[str, list[str]] = {}
 
-    for lang_dir in sorted(parallel_dir.iterdir()):
-        if not lang_dir.is_dir():
-            continue
-        lang = lang_dir.name
-        texts = []
-        for jsonl_file in sorted(lang_dir.glob("*.jsonl")):
-            with open(jsonl_file) as f:
-                for line in f:
-                    obj = json.loads(line.strip())
-                    texts.append(obj["text"])
-        if texts:
-            parallel_data[lang] = texts
-            logger.info(f"Loaded {len(texts)} texts for language '{lang}'")
+    # Discover all parallel directories (flat or tiered)
+    parallel_dirs = []
+    flat_parallel = data_dir / "parallel"
+    if flat_parallel.is_dir():
+        parallel_dirs.append(flat_parallel)
+    else:
+        # Look for tier subdirectories (short/medium/long)
+        for tier_dir in sorted(data_dir.iterdir()):
+            if tier_dir.is_dir():
+                tier_parallel = tier_dir / "parallel"
+                if tier_parallel.is_dir():
+                    parallel_dirs.append(tier_parallel)
+                    logger.info(f"Found tier: {tier_dir.name}/parallel/")
+
+    if not parallel_dirs:
+        logger.warning(f"No parallel directories found in {data_dir}")
+        return parallel_data
+
+    # Aggregate texts across all tiers
+    for parallel_dir in parallel_dirs:
+        for lang_dir in sorted(parallel_dir.iterdir()):
+            if not lang_dir.is_dir():
+                continue
+            lang = lang_dir.name
+            if lang not in parallel_data:
+                parallel_data[lang] = []
+            for jsonl_file in sorted(lang_dir.glob("*.jsonl")):
+                with open(jsonl_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        obj = json.loads(line)
+                        parallel_data[lang].append(obj["text"])
+
+    for lang, texts in parallel_data.items():
+        logger.info(f"Loaded {len(texts)} texts for language '{lang}'")
 
     return parallel_data
