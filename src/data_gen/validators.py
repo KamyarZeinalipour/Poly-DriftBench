@@ -144,6 +144,10 @@ class ConversationValidator:
         self._check_assistant_variety(asst_msgs, report)
         self._check_user_length_variance(user_msgs, report)
 
+        # ─── Coherence Rules ─────────────────────────
+        self._check_coherence(conversation, report)
+        self._check_topic_repetition(asst_msgs, report)
+
         # ─── Compute Summary Metrics ──────────────────
         report.metrics = self._compute_metrics(conversation, user_msgs, asst_msgs)
 
@@ -182,15 +186,13 @@ class ConversationValidator:
                     message=f"Assistant turn {turn_num+1}: Contains forbidden word 'however'"
                 ))
 
-            # L4: Source citation
-            has_source = bool(
-                re.search(r'\[Source:', content) or
-                re.search(r'According to\s', content, re.IGNORECASE)
-            )
+            # L4: Source citation — MUST use [Source: ...] format
+            # Note: "According to" is NOT accepted as valid DDM L4 compliance.
+            has_source = bool(re.search(r'\[Source:', content))
             if not has_source:
                 report.issues.append(ValidationIssue(
                     turn=turn_num, rule="DDM_L4", severity="error",
-                    message=f"Assistant turn {turn_num+1}: Missing source citation"
+                    message=f"Assistant turn {turn_num+1}: Missing [Source: ...] citation"
                 ))
 
     # ─── Structural Checks ───────────────────────────
@@ -340,6 +342,98 @@ class ConversationValidator:
                 )
             ))
 
+    # ─── Coherence Checks ────────────────────────────
+
+    def _check_coherence(self, conversation: list[dict], report: ValidationReport):
+        """
+        Check for phantom references — user mentions advice/items that
+        never appeared in prior assistant messages.
+        """
+        for i, msg in enumerate(conversation):
+            if msg["role"] != "user":
+                continue
+
+            content_lower = msg["content"].lower()
+
+            # Detect "you mentioned X" / "you said X" / "like you said" patterns
+            ref_patterns = [
+                r'(?:you\s+(?:mentioned|said|suggested|told\s+me|recommended|asked\s+me))\s+(.{10,80}?)(?:\.|,|\?|!|$)',
+                r'(?:like\s+you\s+(?:said|suggested|mentioned))\s*,?\s*(.{5,60}?)(?:\.|,|\?|!|$)',
+                r'(?:the\s+.{3,30}\s+(?:you\s+mentioned|you\s+suggested))(.{0,10}?)(?:\.|,|\?|!|$)',
+            ]
+
+            # Gather all prior assistant text for verification
+            prior_asst_text = " ".join(
+                m["content"].lower() for m in conversation[:i]
+                if m["role"] == "assistant"
+            )
+
+            if not prior_asst_text:
+                continue
+
+            for pattern in ref_patterns:
+                refs = re.findall(pattern, content_lower)
+                for ref in refs:
+                    ref_clean = ref.strip()
+                    if len(ref_clean) < 5:
+                        continue
+                    # Extract key terms (words > 4 chars) from the reference
+                    key_terms = [w for w in re.findall(r'[a-z]{5,}', ref_clean)]
+                    if not key_terms:
+                        continue
+                    # Check if ANY key term appears in prior assistant messages
+                    if not any(term in prior_asst_text for term in key_terms):
+                        report.issues.append(ValidationIssue(
+                            turn=i, rule="COHER_PHANTOM_REF", severity="warning",
+                            message=(
+                                f"Message {i+1}: User references '{ref_clean}' "
+                                f"but no matching content found in prior assistant messages"
+                            )
+                        ))
+
+    def _check_topic_repetition(
+        self, asst_msgs: list[dict], report: ValidationReport
+    ):
+        """
+        Detect the same advice/topic being repeated far apart in long
+        conversations — a sign the model forgot earlier context.
+        Only runs for medium/long conversations (≥20 assistant turns).
+        """
+        if len(asst_msgs) < 20:
+            return
+
+        # Extract "advice fingerprints" per assistant turn
+        fingerprints = []
+        for msg in asst_msgs:
+            bullets = re.findall(
+                r'^\s*\d+[\.)\s]\s*(.+)$', msg["content"], re.MULTILINE
+            )
+            terms = set()
+            for b in bullets:
+                # Extract substantive words (>5 chars, no stopwords)
+                words = [w.lower() for w in re.findall(r'[a-zA-Z]{6,}', b)]
+                terms.update(words[:5])  # First 5 per bullet
+            fingerprints.append(terms)
+
+        # Compare non-adjacent turns (gap ≥ 10 turns) for high overlap
+        for i in range(len(fingerprints)):
+            for j in range(i + 10, len(fingerprints)):
+                if not fingerprints[i] or not fingerprints[j]:
+                    continue
+                if len(fingerprints[i]) < 3 or len(fingerprints[j]) < 3:
+                    continue  # Skip turns with too few terms
+                overlap = len(fingerprints[i] & fingerprints[j])
+                union = len(fingerprints[i] | fingerprints[j])
+                jaccard = overlap / union if union > 0 else 0
+                if jaccard > 0.4:
+                    report.issues.append(ValidationIssue(
+                        turn=j, rule="QUAL_TOPIC_REPEAT", severity="warning",
+                        message=(
+                            f"Assistant turn {j+1} repeats advice from turn {i+1} "
+                            f"(overlap={jaccard:.0%})"
+                        )
+                    ))
+
     # ─── Metrics ─────────────────────────────────────
 
     def _compute_metrics(
@@ -377,8 +471,7 @@ class ConversationValidator:
         )
         ddm_l4 = sum(
             1 for m in asst_msgs
-            if re.search(r'\[Source:', m["content"]) or
-               re.search(r'According to\s', m["content"], re.IGNORECASE)
+            if re.search(r'\[Source:', m["content"])
         )
         n = max(len(asst_msgs), 1)
         metrics["ddm_l1_rate"] = round(ddm_l1 / n, 3)

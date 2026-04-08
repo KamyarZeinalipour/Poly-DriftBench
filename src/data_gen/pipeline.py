@@ -221,8 +221,43 @@ class DataFactory:
                         )
                         conversation[msg_idx]["content"] = new_response
 
-                # Re-validate after fixes
+                # Re-validate after LLM-based fix
                 rule_result = self._rule_based_validate(conversation)
+
+                # If DDM errors STILL persist, apply deterministic force-fix
+                if not rule_result["passed"]:
+                    remaining_ddm = [
+                        i for i in rule_result["issues"]
+                        if i["rule"].startswith("DDM_") and i["severity"] == "error"
+                    ]
+                    if remaining_ddm:
+                        console.print(
+                            f"  🔩 [red]Force-fixing[/red] {len(remaining_ddm)} "
+                            f"persistent DDM violations (deterministic)..."
+                        )
+                        remaining_turns = set(i["turn"] for i in remaining_ddm)
+                        for turn_idx in remaining_turns:
+                            msg_idx = turn_idx * 2 + 1
+                            if msg_idx < len(conversation) and conversation[msg_idx]["role"] == "assistant":
+                                conversation[msg_idx]["content"] = (
+                                    AssistantSimulator.force_fix_ddm(
+                                        conversation[msg_idx]["content"]
+                                    )
+                                )
+                        # Final re-validate
+                        rule_result = self._rule_based_validate(conversation)
+
+            # Log coherence warnings (non-blocking but informative)
+            coherence_warnings = [
+                i for i in rule_result["issues"]
+                if i["rule"].startswith("COHER_") or i["rule"] == "QUAL_TOPIC_REPEAT"
+            ]
+            if coherence_warnings:
+                console.print(
+                    f"  ⚠️  [yellow]{len(coherence_warnings)} coherence warnings[/yellow]"
+                )
+                for w in coherence_warnings:
+                    logger.warning(f"    ⚠️  {w['rule']}: {w['msg']}")
 
         # Phase 3b: LLM-based audit (expensive, nuanced)
         for revision_round in range(self.max_revision_rounds):
