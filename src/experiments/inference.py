@@ -66,6 +66,11 @@ class InferenceResult:
     context_lengths_tokens: list[int] = field(default_factory=list)
     generation_times: list[float] = field(default_factory=list)
     total_time: float = 0.0
+    # Gold-context tracking
+    gold_context_mode: str = "free"       # "free", "gold_until", "gold_ratio"
+    gold_turns_used: list[bool] = field(default_factory=list)
+    # Prompt placement tracking
+    prompt_placement: str = "top"          # "top", "appended", "both"
 
 
 class ModelManager:
@@ -359,6 +364,365 @@ def run_reinjection_inference(
 
         conversation.append({"role": "assistant", "content": response_text})
 
+    return result
+
+
+def run_gold_context_inference(
+    model,
+    tokenizer,
+    user_messages: list[str],
+    gold_assistant_responses: list[str],
+    system_prompt: str,
+    gold_until: int = None,
+    gold_ratio: float = None,
+    max_new_tokens: int = 512,
+    temperature: float = 0.0,
+    compute_perplexity: bool = False,
+) -> InferenceResult:
+    """
+    Run turn-by-turn inference with gold assistant responses as context scaffolding.
+
+    Instead of using the model's own responses for conversation history, this
+    function injects pre-generated DDM-compliant (gold) responses. This isolates
+    pure instruction forgetting from cascading context degradation.
+
+    Two scaffolding strategies (mutually exclusive):
+
+    1. gold_until (int): Use gold responses for the first N turns, then switch
+       to the model's own responses. This measures how quickly cascade damage
+       kicks in after removing scaffolding.
+
+    2. gold_ratio (float, 0.0-1.0): Fraction of turns that use gold context.
+       Gold turns are evenly distributed. E.g., gold_ratio=0.5 means every
+       other turn uses gold context. This measures how much periodic
+       scaffolding a model needs to maintain compliance.
+
+    If neither is set, ALL turns use gold context (full scaffolding).
+
+    Args:
+        model: The loaded causal LM.
+        tokenizer: The tokenizer.
+        user_messages: List of user message strings (one per turn).
+        gold_assistant_responses: Corresponding gold assistant responses.
+        system_prompt: The DDM system prompt.
+        gold_until: Use gold for first N turns, then free-form.
+        gold_ratio: Fraction of turns using gold (0.0=free, 1.0=all gold).
+        max_new_tokens: Max tokens to generate per response.
+        temperature: Generation temperature (0 = greedy).
+        compute_perplexity: Whether to compute response perplexity.
+
+    Returns:
+        InferenceResult with responses scored at each turn.
+    """
+    n_turns = min(len(user_messages), len(gold_assistant_responses))
+
+    # Determine which turns use gold context
+    use_gold = [False] * n_turns
+    if gold_until is not None:
+        # Gold for first N turns, then free-form
+        for i in range(min(gold_until, n_turns)):
+            use_gold[i] = True
+        mode_label = f"gold_until_{gold_until}"
+    elif gold_ratio is not None:
+        # Distribute gold turns evenly based on ratio
+        if gold_ratio >= 1.0:
+            use_gold = [True] * n_turns
+        elif gold_ratio > 0.0:
+            # Place gold turns at regular intervals
+            interval = 1.0 / gold_ratio
+            for i in range(n_turns):
+                if (i % max(1, int(round(interval)))) == 0:
+                    use_gold[i] = True
+        mode_label = f"gold_ratio_{gold_ratio:.2f}"
+    else:
+        # Full gold context
+        use_gold = [True] * n_turns
+        mode_label = "gold_full"
+
+    result = InferenceResult(
+        conversation_id="",
+        language="",
+        model_name="",
+        gold_context_mode=mode_label,
+    )
+
+    conversation = [{"role": "system", "content": system_prompt}]
+
+    gen_config = GenerationConfig(
+        max_new_tokens=max_new_tokens,
+        do_sample=temperature > 0,
+        temperature=temperature if temperature > 0 else 1.0,
+        top_p=1.0,
+        pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+    )
+
+    for turn_idx in range(n_turns):
+        user_msg = user_messages[turn_idx]
+        conversation.append({"role": "user", "content": user_msg})
+
+        # Tokenize and generate
+        try:
+            input_text = tokenizer.apply_chat_template(
+                conversation, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            input_text = _format_conversation_fallback(conversation)
+
+        input_ids = tokenizer.encode(
+            input_text, return_tensors="pt", truncation=True
+        ).to(model.device)
+
+        context_length = input_ids.shape[1]
+        result.context_lengths_tokens.append(context_length)
+
+        t0 = time.time()
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids,
+                generation_config=gen_config,
+                return_dict_in_generate=True,
+                output_scores=compute_perplexity,
+            )
+        gen_time = time.time() - t0
+        result.generation_times.append(gen_time)
+
+        # Extract model's generated response (always scored)
+        generated_ids = outputs.sequences[0][context_length:]
+        response_text = tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
+        result.responses.append(response_text)
+
+        if compute_perplexity and outputs.scores:
+            ppl = _compute_response_perplexity(outputs.scores, generated_ids)
+            result.response_perplexities.append(ppl)
+
+        # Context decision: gold or model's own response?
+        if use_gold[turn_idx]:
+            # Use gold (DDM-compliant) response for context
+            conversation.append({
+                "role": "assistant",
+                "content": gold_assistant_responses[turn_idx],
+            })
+        else:
+            # Use model's own response for context
+            conversation.append({
+                "role": "assistant",
+                "content": response_text,
+            })
+
+        result.gold_turns_used.append(use_gold[turn_idx])
+
+    return result
+
+
+def run_prompt_placement_inference(
+    model,
+    tokenizer,
+    user_messages: list[str],
+    system_prompt: str,
+    placement: str = "appended",
+    max_new_tokens: int = 512,
+    temperature: float = 0.0,
+    compute_perplexity: bool = False,
+) -> InferenceResult:
+    """
+    Run inference with the system prompt at different positions.
+
+    Tests whether drift is a positional problem (RoPE decay / attention sinks)
+    or a cognitive limitation.
+
+    Placement modes:
+        - 'top': Standard — system prompt as Turn 0 (baseline).
+        - 'appended': System rules appended to EVERY user message.
+                     No separate system prompt. Rules are always at the
+                     bottom of the context, close to the generation point.
+        - 'both': System prompt at top AND appended to every user message.
+
+    If 'appended' eliminates drift, the problem is positional (the model
+    can't attend to distant tokens). If drift persists, it's cognitive.
+    """
+    result = InferenceResult(
+        conversation_id="",
+        language="",
+        model_name="",
+        prompt_placement=placement,
+    )
+
+    # Build conversation based on placement mode
+    if placement == "top":
+        # Standard mode — system prompt at the beginning
+        conversation = [{"role": "system", "content": system_prompt}]
+        msg_modifier = lambda msg: msg
+    elif placement == "appended":
+        # No system prompt — rules appended to each user message
+        conversation = []
+        rules_suffix = f"\n\n[REMINDER — Follow these rules:]\n{system_prompt}"
+        msg_modifier = lambda msg: msg + rules_suffix
+    elif placement == "both":
+        # System prompt at top AND appended to each user message
+        conversation = [{"role": "system", "content": system_prompt}]
+        rules_suffix = f"\n\n[REMINDER — Follow these rules:]\n{system_prompt}"
+        msg_modifier = lambda msg: msg + rules_suffix
+    else:
+        raise ValueError(f"Unknown placement: {placement}")
+
+    gen_config = GenerationConfig(
+        max_new_tokens=max_new_tokens,
+        do_sample=temperature > 0,
+        temperature=temperature if temperature > 0 else 1.0,
+        top_p=1.0,
+        pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+    )
+
+    for user_msg in user_messages:
+        conversation.append({"role": "user", "content": msg_modifier(user_msg)})
+
+        try:
+            input_text = tokenizer.apply_chat_template(
+                conversation, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            input_text = _format_conversation_fallback(conversation)
+
+        input_ids = tokenizer.encode(
+            input_text, return_tensors="pt", truncation=True
+        ).to(model.device)
+
+        context_length = input_ids.shape[1]
+        result.context_lengths_tokens.append(context_length)
+
+        t0 = time.time()
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids,
+                generation_config=gen_config,
+                return_dict_in_generate=True,
+                output_scores=compute_perplexity,
+            )
+        gen_time = time.time() - t0
+        result.generation_times.append(gen_time)
+
+        generated_ids = outputs.sequences[0][context_length:]
+        response_text = tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
+        result.responses.append(response_text)
+
+        if compute_perplexity and outputs.scores:
+            ppl = _compute_response_perplexity(outputs.scores, generated_ids)
+            result.response_perplexities.append(ppl)
+
+        conversation.append({"role": "assistant", "content": response_text})
+
+    return result
+
+
+def run_dynamic_inference(
+    model,
+    tokenizer,
+    dynamic_user,
+    system_prompt: str,
+    num_turns: int = 50,
+    max_new_tokens: int = 512,
+    temperature: float = 0.0,
+    compute_perplexity: bool = False,
+) -> InferenceResult:
+    """
+    Run inference with a live DeepSeek user simulator (Track 2).
+
+    Instead of reading pre-written user messages from a JSON file,
+    this function uses a DynamicUserSimulator to generate user messages
+    on-the-fly based on the test model's actual responses. This eliminates
+    trajectory mismatch entirely.
+
+    Args:
+        model: HuggingFace model.
+        tokenizer: HuggingFace tokenizer.
+        dynamic_user: DynamicUserSimulator instance.
+        system_prompt: DDM system prompt with rules.
+        num_turns: Number of turn pairs to generate.
+        max_new_tokens: Max tokens per response.
+        temperature: Sampling temperature.
+        compute_perplexity: Whether to compute per-turn perplexity.
+
+    Returns:
+        InferenceResult with responses and metrics.
+    """
+    result = InferenceResult(
+        conversation_id=f"dynamic_{dynamic_user.domain}",
+        language="en",
+        model_name="",
+        gold_context_mode="dynamic",
+    )
+
+    gen_config = GenerationConfig(
+        max_new_tokens=max_new_tokens,
+        do_sample=temperature > 0,
+        temperature=temperature if temperature > 0 else 1.0,
+        top_p=1.0,
+        pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+    )
+
+    # Build conversation with system prompt
+    conversation = [{"role": "system", "content": system_prompt}]
+
+    # Generate the first user message
+    first_msg = dynamic_user.generate_first_message()
+    conversation.append({"role": "user", "content": first_msg})
+
+    for turn_idx in range(num_turns):
+        # Encode the conversation
+        try:
+            input_text = tokenizer.apply_chat_template(
+                conversation, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            input_text = _format_conversation_fallback(conversation)
+
+        input_ids = tokenizer.encode(
+            input_text, return_tensors="pt", truncation=True
+        ).to(model.device)
+
+        context_length = input_ids.shape[1]
+        result.context_lengths_tokens.append(context_length)
+
+        # Generate model response
+        t0 = time.time()
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids,
+                generation_config=gen_config,
+                return_dict_in_generate=True,
+                output_scores=compute_perplexity,
+            )
+        gen_time = time.time() - t0
+        result.generation_times.append(gen_time)
+
+        generated_ids = outputs.sequences[0][context_length:]
+        response_text = tokenizer.decode(
+            generated_ids, skip_special_tokens=True
+        ).strip()
+        result.responses.append(response_text)
+
+        if compute_perplexity and outputs.scores:
+            ppl = _compute_response_perplexity(outputs.scores, generated_ids)
+            result.response_perplexities.append(ppl)
+
+        # Add model response to conversation
+        conversation.append({"role": "assistant", "content": response_text})
+
+        # Generate next user message dynamically (unless last turn)
+        if turn_idx < num_turns - 1:
+            next_user_msg = dynamic_user.generate_next_message(conversation)
+            conversation.append({"role": "user", "content": next_user_msg})
+
+        logger.info(
+            f"  Dynamic turn {turn_idx + 1}/{num_turns} "
+            f"(ctx={context_length} tokens, {gen_time:.1f}s)"
+        )
+
+    result.total_time = sum(result.generation_times)
     return result
 
 

@@ -2,23 +2,24 @@
 Deterministic Drift Metric (DDM) — Multi-Level Constraint Evaluator
 ====================================================================
 Measures instruction adherence decay across conversational turns using
-four hierarchical constraints, producing a continuous Decay Gradient.
+five hierarchical constraints, producing a continuous Decay Gradient.
 
-Levels:
+Levels (Orthogonal Constraint Taxonomy):
     L1 (Format)    — Exact string tag appended to every response
     L2 (Structure) — Numbered bullet point format (with partial credit)
     L3 (Lexical)   — Forbidden word avoidance (cross-lingual)
     L4 (Semantic)  — Citation before factual claims (strict)
+    L5 (Dynamic)   — Turn counter [Turn: N] that must increment each turn
 
 Metrics:
-    - DDM Score (per-turn): Weighted sum of L1–L4, continuous 0.0–1.0
+    - DDM Score (per-turn): Weighted sum of L1–L5, continuous 0.0–1.0
     - DOP  (Drift Onset Point): First turn where DDM < 1.0
     - Sustained DOP: First turn where DDM < 1.0 for k consecutive turns
     - TCP  (Total Collapse Point): First turn where DDM = 0.0
     - AUC  (Area Under Decay Curve): Integral of DDM over turns, normalized
     - Half-Life (τ½): Turn at which DDM drops to ≤ 0.5
     - Recovery Rate: Fraction of post-drift turns where DDM recovers to 1.0
-    - Per-Level Decay Curves: Independent L1/L2/L3/L4 pass rates over turns
+    - Per-Level Decay Curves: Independent L1/L2/L3/L4/L5 pass rates over turns
     - CI95: Bootstrap confidence intervals on DOP and mean DDM
 """
 
@@ -163,6 +164,36 @@ class L4CitationChecker:
         return 0.0
 
 
+
+class L5StateTracker:
+    """
+    L5: Dynamic State-Tracking — checks that each response begins with
+    [Turn: N] where N increments by exactly 1 each turn.
+
+    Unlike L1-L4 (static rules that don't change per turn), L5 requires
+    the model to actively compute state based on its position in the
+    conversation. This separates static pattern-matching from true
+    dynamic reasoning.
+    """
+
+    def __init__(self):
+        # Pattern: [Turn: N] at the start (with optional whitespace)
+        self.pattern = re.compile(
+            r"^\s*\[Turn:\s*(\d+)\]", re.IGNORECASE
+        )
+
+    def check(self, response: str, expected_turn: int) -> float:
+        """
+        Returns 1.0 if [Turn: N] is present and N == expected_turn.
+        Returns 0.0 otherwise.
+        """
+        match = self.pattern.search(response)
+        if not match:
+            return 0.0
+        actual = int(match.group(1))
+        return 1.0 if actual == expected_turn else 0.0
+
+
 # ──────────────────────────────────────────────────────────
 # Data Classes for Results
 # ──────────────────────────────────────────────────────────
@@ -175,7 +206,8 @@ class TurnResult:
     l2_score: float      # 0.0 to 1.0 (partial credit)
     l3_score: float      # 0.0 or 1.0 (binary)
     l4_score: float      # 0.0 or 1.0 (binary)
-    ddm_score: float     # Weighted combination, 0.0 to 1.0
+    l5_score: float = 0.0  # 0.0 or 1.0 (dynamic state-tracking)
+    ddm_score: float = 0.0  # Weighted combination, 0.0 to 1.0
 
     # Backward-compatible boolean properties
     @property
@@ -195,6 +227,10 @@ class TurnResult:
         return self.l4_score >= 1.0
 
     @property
+    def l5_pass(self) -> bool:
+        return self.l5_score >= 1.0
+
+    @property
     def all_pass(self) -> bool:
         return self.ddm_score >= 1.0
 
@@ -202,7 +238,7 @@ class TurnResult:
 @dataclass
 class PerLevelDecay:
     """Per-level decay statistics across all turns."""
-    level: str                                  # "L1", "L2", "L3", "L4"
+    level: str                                  # "L1", "L2", "L3", "L4", "L5"
     scores: list[float] = field(default_factory=list)
     mean_score: float = 0.0
     decay_onset: Optional[int] = None           # First turn where score < 1.0
@@ -349,12 +385,14 @@ class ConversationDriftResult:
         l2_scores = [t.l2_score for t in self.turn_results]
         l3_scores = [t.l3_score for t in self.turn_results]
         l4_scores = [t.l4_score for t in self.turn_results]
+        l5_scores = [t.l5_score for t in self.turn_results]
 
         for level_name, level_scores in [
             ("L1_format", l1_scores),
             ("L2_structure", l2_scores),
             ("L3_lexical", l3_scores),
             ("L4_citation", l4_scores),
+            ("L5_dynamic", l5_scores),
         ]:
             decay = PerLevelDecay(level=level_name, scores=level_scores)
             decay.compute()
@@ -366,7 +404,7 @@ class ConversationDriftResult:
 # ──────────────────────────────────────────────────────────
 
 # Default constraint weights (equal by default; can be overridden)
-DEFAULT_WEIGHTS = {"L1": 0.25, "L2": 0.25, "L3": 0.25, "L4": 0.25}
+DEFAULT_WEIGHTS = {"L1": 0.20, "L2": 0.20, "L3": 0.20, "L4": 0.20, "L5": 0.20}
 
 
 class DDMEvaluator:
@@ -431,19 +469,22 @@ class DDMEvaluator:
         )
 
         self.l4 = L4CitationChecker(strict=strict_citations)
+        self.l5 = L5StateTracker()
 
     def evaluate_turn(self, response: str, turn_number: int) -> TurnResult:
-        """Evaluate a single turn against all four constraint levels."""
+        """Evaluate a single turn against all five constraint levels."""
         l1 = self.l1.check(response)
         l2 = self.l2.check(response)
         l3 = self.l3.check(response)
         l4 = self.l4.check(response)
+        l5 = self.l5.check(response, expected_turn=turn_number)
 
         ddm_score = (
             self.weights["L1"] * l1
             + self.weights["L2"] * l2
             + self.weights["L3"] * l3
             + self.weights["L4"] * l4
+            + self.weights.get("L5", 0.0) * l5
         )
 
         return TurnResult(
@@ -452,6 +493,7 @@ class DDMEvaluator:
             l2_score=l2,
             l3_score=l3,
             l4_score=l4,
+            l5_score=l5,
             ddm_score=ddm_score,
         )
 

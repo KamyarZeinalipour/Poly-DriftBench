@@ -7,9 +7,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Languages-EN%20%7C%20IT%20%7C%20ES%20%7C%20FR%20%7C%20DE-blue" alt="Languages">
   <img src="https://img.shields.io/badge/Models-12-orange" alt="Models">
-  <img src="https://img.shields.io/badge/Experiments-13-red" alt="Experiments">
+  <img src="https://img.shields.io/badge/Experiments-15-red" alt="Experiments">
   <img src="https://img.shields.io/badge/Conversations-4%2C500-green" alt="Conversations">
-  <img src="https://img.shields.io/badge/Pipeline-v6--full--experiment-purple" alt="Pipeline">
+  <img src="https://img.shields.io/badge/Pipeline-v7--catd--l5--dual--track-purple" alt="Pipeline">
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
 </p>
 
@@ -26,13 +26,28 @@
 ### Key Contributions
 
 1. **Poly-DriftBench** — A parallel corpus of 4,500 DDM-constrained conversations across 5 languages and 3 length tiers
-2. **Drift Decay Model (DDM)** — A 4-level constraint evaluation framework with continuous scoring, AUC, half-life, and bootstrap CIs
-3. **13 experiments** spanning GPU inference, analytical, and mechanistic analysis across 12 open-source models
-4. **Token Squeeze Proof** — Paraphrastic control experiment isolating tokenizer fertility as the causal factor
+2. **Drift Decay Model (DDM) v2** — A 5-level constraint evaluation framework (L1-L5) with continuous scoring, AUC, half-life, and bootstrap CIs
+3. **Gold-Context Decomposition** — Novel Oracle scaffolding that decomposes `Drift = Pure Forgetting + Cascade Damage`
+4. **Dual-Track Validation** — Static (CAT-D) + Dynamic (DeepSeek agentic) evaluation proving drift isn't a benchmark artifact
+5. **15 experiments** spanning GPU inference, analytical, mechanistic, and validation analysis across 12 open-source models
+6. **Token Squeeze Proof** — Paraphrastic control experiment isolating tokenizer fertility as the causal factor
+
+### 6 Features Only We Have (vs. 8 Related Works)
+
+| # | Feature | What It Proves |
+|---|---|---|
+| 1 | **Gold-Context Decomposition** | Separates "model forgets" from "one mistake causes more" |
+| 2 | **Dual-Track Validation** | Proves benchmark measures real drift, not artifacts |
+| 3 | **120-Turn Drift Curves** | 6× longer than closest competitor (EvolIF ~20 turns) |
+| 4 | **L5 Dynamic State Constraint** | Separates memory (pattern matching) from computation |
+| 5 | **Cross-Lingual Drift × Token Fertility** | First link between language "cost" and instruction decay |
+| 6 | **Kaplan-Meier Survival Curves** | Medical-grade statistics applied to IF for first time |
+
+> See [`docs/paper_comparison/`](docs/paper_comparison/) for full paper-by-paper comparison tables.
 
 ---
 
-## 🧪 The 13-Experiment Pipeline
+## 🧪 The 15-Experiment Pipeline
 
 ### GPU-Heavy Experiments (Model Inference)
 
@@ -45,6 +60,8 @@
 | 6 | **System Prompt Re-injection** | Re-inject instructions at turns 15/30/50, measure DDM recovery | Recovery boost |
 | 7 | **Context Budget Analysis** | Track DDM vs context window utilization (%), not turn number | Critical utilization % |
 | 8 | **Perplexity at Drift Onset** | Measure model certainty when instructions start to degrade | Confident vs confused drift |
+| 14 | **Gold-Context Scaffolding** | Compare free-form vs gold-context drift → decompose forgetting vs cascade | Δ(DOP) |
+| 15 | **Static vs Dynamic Delta** | Compare static (CAT-D) vs dynamic (DeepSeek) user simulation | DOP_static ≈ DOP_dynamic |
 
 ### Analytical Experiments (Post-Processing)
 
@@ -54,7 +71,7 @@
 | 9 | **Drift Velocity** | Rate of DDM decay (ΔDDM/Δturn), rolling window | ANOVA across languages |
 | 10 | **Cross-Model Consistency** | Do all 12 models rank languages in the same drift order? | Kendall's W concordance |
 | 11 | **Tier Effect Analysis** | Compare drift across short/medium/long tiers | Kruskal-Wallis, Cohen's d |
-| 12 | **Per-Level Failure Ordering** | Which DDM constraint (L1–L4) fails first per language? | Chi-squared independence |
+| 12 | **Per-Level Failure Ordering** | Which DDM constraint (L1–L5) fails first per language? | Chi-squared independence |
 
 ### Mechanistic Experiment
 
@@ -64,22 +81,25 @@
 
 ---
 
-## 📊 The DDM (Drift Decay Model)
+## 📊 The DDM v2 (Drift Decay Model)
 
-### 4 Constraint Levels
+### 5 Constraint Levels
 
-| Level | Constraint | What It Measures | Scoring |
-|-------|-----------|-----------------|---------|
-| **L1** | `[SYS_ACK: ACTIVE]` canary tag | Basic instruction retention | Binary (with/without brackets) |
-| **L2** | Numbered bullet points (1. 2. 3.) | Format compliance | Continuous (0–1, partial credit) |
-| **L3** | Forbidden word ban ("however" + per-language lists) | Lexical constraint adherence | Binary per language |
-| **L4** | `[Source: ...]` or "According to..." citations | Citation retention | Binary with strict mode |
+| Level | Constraint | What It Measures | Scoring | Type |
+|-------|-----------|-----------------|---------|------|
+| **L1** | `[SYS_ACK: ACTIVE]` canary tag | Basic instruction retention | Binary | Static |
+| **L2** | Numbered bullet points (1. 2. 3.) | Format compliance | Continuous (0–1) | Static |
+| **L3** | Forbidden word ban ("however" + per-language) | Lexical constraint adherence | Binary | Static |
+| **L4** | `[Source: ...]` citation | Citation retention | Binary | Static |
+| **L5** | `[Turn: N]` counter (must increment) | **Dynamic state-tracking** | Binary | **Dynamic** |
+
+> L1-L4 test static pattern-matching. L5 tests active computation — the model must track and increment a counter. This separates "memory" from "reasoning."
 
 ### Enhanced Metrics
 
 | Metric | Definition | Use |
 |--------|-----------|-----|
-| **DDM Score** | Mean of L1–L4 per turn (0.0–1.0) | Turn-level compliance |
+| **DDM Score** | Weighted mean of L1–L5 per turn (0.0–1.0) | Turn-level compliance |
 | **DOP** (Drift Onset Point) | First turn where DDM < 1.0 | When drift starts |
 | **sDOP** (Sustained DOP) | First turn where DDM stays below 1.0 for 3+ turns | Robust onset detection |
 | **τ½** (Half-Life) | Turn where DDM first drops ≤ 0.5 | Severity measure |
@@ -110,8 +130,15 @@
 **Total: 75 conversations × 5 languages = 375 parallel conversation sets**  
 **Total inference: 12 models × 375 = 4,500 evaluated conversations**
 
-### 9 Conversation Domains
-IT Troubleshooting · Legal Document Review · Customer Support · Travel Planning · Medical Consultation · Financial Advisory · Academic Tutoring · Recipe Instruction · Real Estate · Insurance Claims
+### 10 Conversation Domains (5 Easy / 3 Medium / 2 Hard)
+
+| Difficulty | Domains | State-Tracking Complexity |
+|---|---|---|
+| 🟢 Easy (5) | Daily Life Tips · Cooking · Pet Care · Entertainment · Home & Garden | Stateless — each turn independent |
+| 🟡 Medium (3) | Gift Shopping · Fitness · Study Tips | Shallow dependency — references prior turns |
+| 🔴 Hard (2) | Travel Planning · Event Planning | Deep dependency — branching decisions across turns |
+
+> Difficulty is defined by **conversation complexity** (state-tracking), NOT content knowledge. All topics are trivially easy to answer.
 
 ---
 
@@ -136,17 +163,32 @@ IT Troubleshooting · Legal Document Review · Customer Support · Travel Planni
 
 ## 🏗️ Architecture
 
-### Multi-Agent Data Generation Pipeline
+### Dual-Track Evaluation Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    POLY-DRIFTBENCH                              │
+├──────────────────────────┬──────────────────────────────────────┤
+│  Track 1: Static (CAT-D) │  Track 2: Dynamic (DeepSeek API)   │
+│  Pre-generated user msgs │  Live user simulation on-the-fly   │
+│  100% reproducible       │  Maximum ecological validity       │
+│  Supports Gold-Context   │  Eliminates trajectory mismatch    │
+├──────────────────────────┴──────────────────────────────────────┤
+│  Exp 15: If DOP_static ≈ DOP_dynamic → Drift is REAL          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Multi-Agent Data Generation Pipeline (Track 1)
 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │     Scenario     │────▶│       User       │◀───▶│    Assistant     │
 │    Architect     │     │    Simulator     │     │    Simulator     │
-│  (plans arcs)    │     │  (personality)   │     │  (DDM-compliant) │
+│  (plans arcs)    │     │  (CAT-D design)  │     │ (DDM L1-L5)     │
 └──────────────────┘     └────────┬─────────┘     └────────┬─────────┘
                                  │                         │
                     ┌────────────▼─────────────────────────▼──┐
-                    │     Rule-Based Validator (L1-L4)         │
+                    │     Rule-Based Validator (L1-L5)         │
                     │   + Quality Auditor (LLM-based scoring)  │
                     └────────────────────┬─────────────────────┘
                                          │
@@ -251,18 +293,23 @@ cd annotation_ui && bash start.sh
 Poly-DriftBench/
 ├── configs/
 │   └── default.yaml                    # Models, languages, experiment config
+├── docs/
+│   └── paper_comparison/               # 📄 Related work analysis
+│       ├── comparison_table.md         # Feature grid vs 8 related papers
+│       └── related_work_analysis.md    # Detailed positioning + rebuttal guide
 ├── src/
-│   ├── cli.py                          # CLI entry point (produce, fertility, drift, run-all)
+│   ├── cli.py                          # CLI entry point
 │   ├── data_gen/
-│   │   ├── agents.py                   # 9 specialized agents + PipelineStats
+│   │   ├── agents.py                   # 9 agents + CAT-D user sim + DDM force-fix
 │   │   ├── pipeline.py                 # DataFactory orchestrator
 │   │   ├── validators.py              # Rule-based DDM + translation validators
-│   │   └── seed_generator.py          # Domain templates + seed generation
+│   │   └── seed_generator.py          # 10 domain templates (5E/3M/2H)
 │   ├── evaluation/
-│   │   └── ddm.py                      # DDM scoring (L1–L4, AUC, τ½, sDOP, CI95)
+│   │   └── ddm.py                      # DDM v2 scoring (L1–L5, AUC, τ½, sDOP, CI95)
 │   ├── experiments/
-│   │   ├── runner.py                   # Master 13-experiment orchestrator
-│   │   ├── inference.py                # GPU model manager + conversation inference
+│   │   ├── runner.py                   # Master 15-experiment orchestrator
+│   │   ├── inference.py                # GPU inference + dynamic + placement modes
+│   │   ├── dynamic_user.py             # 🆕 DeepSeek user simulator (Track 2)
 │   │   ├── exp6_reinjection.py         # Exp 6: System prompt re-injection
 │   │   ├── exp7_context_budget.py      # Exp 7: Context budget analysis
 │   │   ├── exp8_perplexity.py          # Exp 8: Perplexity at drift onset
@@ -270,7 +317,9 @@ Poly-DriftBench/
 │   │   ├── exp10_cross_model.py        # Exp 10: Cross-model consistency
 │   │   ├── exp11_tier_effect.py        # Exp 11: Tier effect analysis
 │   │   ├── exp12_level_ordering.py     # Exp 12: Per-level failure ordering
-│   │   └── exp13_token_position.py     # Exp 13: Token position analysis
+│   │   ├── exp13_token_position.py     # Exp 13: Token position analysis
+│   │   ├── exp14_gold_context.py       # Exp 14: Gold-Context scaffolding
+│   │   └── exp15_static_vs_dynamic.py  # 🆕 Exp 15: Static vs Dynamic delta
 │   ├── tokenizer/
 │   │   └── fertility.py                # Token Fertility Ratio computation
 │   ├── expansion/
@@ -283,6 +332,7 @@ Poly-DriftBench/
 │   ├── run_full_experiment.py          # Single-GPU full pipeline
 │   ├── run_multi_gpu.py                # Multi-GPU parallel experiment
 │   ├── merge_and_analyze.py            # Merge GPU results + analytical experiments
+│   ├── regenerate_en.py                # English data regeneration (v7)
 │   └── run_production.py              # Data generation pipeline
 ├── annotation_ui/
 │   ├── app.py                          # Flask annotation server
@@ -291,7 +341,7 @@ Poly-DriftBench/
 ├── data/
 │   └── production/
 │       ├── short/parallel/{en,it,es,fr,de}/    # 25 × 5 short conversations
-│       ├── medium/parallel/{en,it,es,fr,de}/   # 25 × 5 medium conversations
+│       ├── medium/parallel/{en,it,es,fr,de}/   # 50 × 5 medium conversations
 │       └── long/parallel/{en,it,es,fr,de}/     # 25 × 5 long conversations
 ├── results/                            # Experiment outputs
 │   ├── fertility/                      # TFR ratios (CSV, JSON)
@@ -305,8 +355,10 @@ Poly-DriftBench/
 │   ├── drift_velocity/                 # Velocity analysis + ANOVA
 │   ├── cross_model/                    # Kendall's W + pairwise τ
 │   ├── tier_effect/                    # Short vs Medium vs Long
-│   ├── level_ordering/                 # L1–L4 failure cascade
-│   └── token_position/                # System prompt ratio analysis
+│   ├── level_ordering/                 # L1–L5 failure cascade
+│   ├── token_position/                # System prompt ratio analysis
+│   ├── gold_context/                   # 🆕 Forgetting vs cascade decomposition
+│   └── exp15_static_vs_dynamic/        # 🆕 Static vs dynamic drift delta
 ├── requirements.txt
 └── README.md
 ```
@@ -373,7 +425,7 @@ export PYTHONPATH=/path/to/Poly-DriftBench
 - Naturalness (1-5)
 - User Realism (1-5)
 - Coherence (1-5)
-- DDM Compliance — L1/L2/L3/L4 (binary each)
+- DDM Compliance — L1/L2/L3/L4/L5 (binary each)
 - Overall Quality (1-5)
 
 ### Inter-Annotator Agreement
@@ -393,6 +445,8 @@ Target: Krippendorff's α ≥ 0.80 for all constraint levels.
 | Cohen's d | Exp 11 | Effect size between tiers |
 | Chi-squared | Exp 12 | Failure ordering × language independence |
 | Pearson r | Exp 8, 13 | DDM-perplexity / DDM-position correlation |
+| Kaplan-Meier | Exp 2, 14 | Survival analysis for instruction rule "death" |
+| Paired t-test | Exp 15 | Static vs dynamic DOP comparison |
 | Bootstrap CI | All | 95% confidence intervals (n=1000) |
 
 ---

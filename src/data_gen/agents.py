@@ -28,7 +28,7 @@ import json
 import logging
 import random
 import threading
-import time as _time
+import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -102,11 +102,11 @@ class PipelineStats:
             self.api_retries += 1
 
     def start_phase(self, phase_name: str):
-        self._phase_start[phase_name] = _time.time()
+        self._phase_start[phase_name] = time.time()
 
     def end_phase(self, phase_name: str):
         if phase_name in self._phase_start:
-            elapsed = _time.time() - self._phase_start[phase_name]
+            elapsed = time.time() - self._phase_start[phase_name]
             self.phase_timings[phase_name] = round(elapsed, 2)
 
     def to_dict(self) -> dict:
@@ -476,10 +476,37 @@ Key behaviors:
 - Show emotions appropriate to the situation — frustration, relief, confusion,
   impatience, gratitude, annoyance
 - Sometimes be vague or incomplete (real users don't always explain clearly)
-- Occasionally reference things mentioned earlier in the conversation
 - Ask follow-up questions naturally
 - Sometimes say "thanks" or show appreciation
 - Occasionally get sidetracked or bring up tangential concerns
+
+CONTEXT-AGNOSTIC TRAJECTORY DESIGN (CAT-D) — CRITICAL:
+Your messages must work REGARDLESS of what the assistant actually said. During
+evaluation, different AI models will generate different assistant responses, 
+but YOUR messages stay the same. To ensure coherence:
+
+1. TOPIC PIVOTS: Most turns should introduce a NEW sub-topic from the domain.
+   Use transitions like:
+   - "Moving on — I also wanted to ask about..."
+   - "Switching gears — what about..."
+   - "Another question I had..."
+   - "Ok, different topic..."
+
+2. STATE INJECTIONS: When you need continuity, DECLARE the state yourself 
+   instead of referencing the assistant's specific words:
+   - ✅ "Let's say I go with the morning option. What time exactly?"
+   - ✅ "Assuming we pick the budget approach, what's next?"
+   - ❌ "You mentioned 3 walks per day — should the first be in the morning?"
+   - ❌ "About tip #2 from your last response..."
+
+3. SOFT CALLBACKS: When referencing earlier topics, be vague:
+   - ✅ "Going back to what we discussed about feeding..."
+   - ✅ "Earlier you helped me with the walking question — related to that..."
+   - ❌ "You said exactly 2 cups of food per day — is that for all breeds?"
+
+4. NEVER reference specific numbers, names, lists, or details from the
+   assistant's prior response. Your message must be understandable even if
+   the assistant said something completely different.
 
 CRITICAL REALISM BEHAVIORS (use these regularly, not every turn):
 - PUSH BACK: Sometimes disagree with advice. Say things like "I already tried 
@@ -688,6 +715,8 @@ YOUR STRICT FORMATTING RULES (these are non-negotiable):
 4. ALWAYS include at least one [Source: ...] citation in your response.
    Use the EXACT format: [Source: Description of source]
    Do NOT use "According to ..." as a substitute — you MUST use [Source: ...]
+5. ALWAYS begin your response with [Turn: N] where N is your response number.
+   Start with [Turn: 1] for your first response and increment by exactly 1 each time.
 
 These rules represent your professional communication standards. Follow them 
 in EVERY response without exception. They should feel natural, not forced.
@@ -754,12 +783,16 @@ Return ONLY the response text."""
         return self._call_llm(self.SYSTEM_PROMPT, user_prompt, temperature=0.4)
 
     @staticmethod
-    def force_fix_ddm(content: str) -> str:
+    def force_fix_ddm(content: str, turn_number: int = None) -> str:
         """
         Deterministic DDM compliance fix — last resort after LLM retries fail.
         Programmatically patches missing tags without requiring an API call.
         """
         import re
+
+        # L5: Ensure [Turn: N] at the beginning
+        if turn_number is not None and not re.match(r'^\s*\[Turn:\s*\d+\]', content):
+            content = f"[Turn: {turn_number}] " + content.lstrip()
 
         # L1: Ensure [SYS_ACK: ACTIVE] at the end
         if "[SYS_ACK: ACTIVE]" not in content:

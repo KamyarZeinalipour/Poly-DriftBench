@@ -25,94 +25,138 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────
 
 DOMAIN_TEMPLATES = {
-    "it_troubleshooting": {
-        "description": "IT support for enterprise software issues",
-        "user_persona": "A non-technical employee experiencing email and VPN issues",
+    # ═══════════════════════════════════════════════════════
+    # Difficulty = CONVERSATION COMPLEXITY, not content knowledge.
+    # ALL topics must be answerable by any model (even 1B).
+    #
+    # EASY:   Simple one-off questions, short answers.
+    # MEDIUM: Questions with follow-ups and comparisons.
+    # HARD:   Multi-step planning and detailed reasoning.
+    # ═══════════════════════════════════════════════════════
+
+    # ── EASY (5) — Simple Q&A, no follow-up needed ────────
+    "daily_life_tips": {
+        "description": "Everyday life assistant giving practical daily tips",
+        "user_persona": "A friendly person asking for simple everyday tips",
+        "difficulty": "easy",
         "topics": [
-            "email sync failures", "VPN connection drops", "printer setup",
-            "password resets", "software installation", "network latency",
-            "file permission errors", "calendar sync issues",
+            "tips for waking up early", "how to organize a messy closet",
+            "easy ways to save money on groceries", "best morning routines",
+            "how to stay motivated during the week", "simple cleaning hacks",
+            "tips for sleeping better at night", "how to be more productive",
+            "easy ways to reduce daily stress", "weekend activity ideas",
         ],
     },
-    "legal_document_review": {
-        "description": "Legal assistant reviewing contracts and agreements",
-        "user_persona": "A small business owner seeking contract review help",
+    "cooking_food": {
+        "description": "Friendly cooking assistant helping with simple recipes and food ideas",
+        "user_persona": "A home cook looking for easy recipes and meal ideas",
+        "difficulty": "easy",
         "topics": [
-            "NDA clauses", "liability limitations", "payment terms",
-            "intellectual property rights", "termination conditions",
-            "force majeure", "confidentiality scope", "dispute resolution",
+            "what to make for a quick dinner", "easy breakfast ideas",
+            "how to cook pasta perfectly", "simple lunch meal prep",
+            "best snacks for movie night", "how to make a good salad",
+            "easy dessert recipes", "what to cook with leftover chicken",
+            "healthy smoothie recipes", "tips for grocery shopping on a budget",
         ],
     },
-    "customer_support": {
-        "description": "E-commerce customer support handling orders and returns",
-        "user_persona": "A frustrated customer with delivery and product issues",
+    "pet_care": {
+        "description": "Pet care assistant giving basic advice about cats and dogs",
+        "user_persona": "A pet owner asking simple questions about caring for their pet",
+        "difficulty": "easy",
         "topics": [
-            "missing packages", "wrong item received", "refund status",
-            "size exchange", "warranty claims", "billing errors",
-            "loyalty points", "subscription cancellation",
+            "how often to walk a dog", "what to feed a kitten",
+            "best toys for indoor cats", "how to train a puppy not to bite",
+            "when to take a pet to the vet", "how to keep a dog cool in summer",
+            "easy pet grooming tips", "how to introduce a new pet to the family",
+            "best names for a new puppy", "how to clean a fish tank",
         ],
     },
+    "entertainment": {
+        "description": "Entertainment assistant recommending movies, books, and fun activities",
+        "user_persona": "Someone looking for things to watch, read, or do for fun",
+        "difficulty": "easy",
+        "topics": [
+            "good movies to watch this weekend", "book recommendations for beginners",
+            "what podcast to listen to", "fun board games for families",
+            "best TV shows to binge-watch", "easy hobbies to start",
+            "music playlists for studying", "fun outdoor activities for groups",
+            "best video games for casual players", "craft ideas for a rainy day",
+        ],
+    },
+    "home_garden": {
+        "description": "Home and garden assistant with simple household tips",
+        "user_persona": "A homeowner asking basic gardening and home care questions",
+        "difficulty": "easy",
+        "topics": [
+            "how to grow tomatoes at home", "easy indoor plants for beginners",
+            "tips for painting a room", "best flowers for a small garden",
+            "how to keep houseplants alive", "simple DIY decoration ideas",
+            "how to organize a small kitchen", "tips for saving energy at home",
+            "how to start composting", "easy lawn care tips",
+        ],
+    },
+
+    # ── MEDIUM (3) — Needs comparisons and follow-ups ─────
+    "gift_shopping": {
+        "description": "Shopping helper comparing options and suggesting gifts for different people",
+        "user_persona": "Someone shopping for gifts and comparing different options",
+        "difficulty": "medium",
+        "topics": [
+            "birthday gift ideas for a friend", "comparing two similar products",
+            "what to buy for Mother's Day", "best gifts under 50 dollars",
+            "choosing between brands", "gifts for someone who has everything",
+            "holiday gift guide for the family", "best housewarming gifts",
+            "thoughtful anniversary gift ideas", "last-minute gift ideas",
+        ],
+    },
+    "fitness_wellness": {
+        "description": "Wellness assistant helping build simple routines and habits",
+        "user_persona": "A person building healthier habits step by step",
+        "difficulty": "medium",
+        "topics": [
+            "building a simple morning exercise routine", "how to start walking daily",
+            "easy stretches for after sitting all day", "how to drink more water",
+            "tips for eating more fruits and vegetables", "how to stay active at home",
+            "simple ways to improve posture", "best foods for energy during the day",
+            "tips for staying consistent with exercise", "how to relax before bed",
+        ],
+    },
+    "study_tips": {
+        "description": "Study helper giving practical advice about learning and school",
+        "user_persona": "A student looking for better ways to study and do homework",
+        "difficulty": "medium",
+        "topics": [
+            "how to study for a test", "tips for writing a short essay",
+            "best ways to take notes in class", "how to manage homework time",
+            "tips for remembering things better", "how to prepare for a presentation",
+            "best ways to stay focused while studying", "how to work well in a group project",
+            "tips for reading a textbook effectively", "how to review before a final exam",
+        ],
+    },
+
+    # ── HARD (2) — Multi-step planning, still common knowledge ──
     "travel_planning": {
-        "description": "Travel agent assisting with trip planning",
-        "user_persona": "A couple planning a two-week European vacation",
+        "description": "Travel helper assisting with multi-step trip planning and packing",
+        "user_persona": "Someone planning a trip who needs help with multiple steps like packing, scheduling, and budgeting",
+        "difficulty": "hard",
         "topics": [
-            "flight bookings", "hotel recommendations", "visa requirements",
-            "travel insurance", "local transportation", "restaurant reservations",
-            "activity planning", "budget tracking",
+            "planning a weekend trip step by step", "what to pack for different weather",
+            "how to plan a road trip itinerary", "budgeting for a family vacation",
+            "tips for flying with kids", "how to find affordable accommodations",
+            "planning a day trip to a nearby city", "what to do if you lose your luggage",
+            "how to plan meals while traveling", "tips for staying safe while traveling",
         ],
     },
-    "medical_consultation": {
-        "description": "Medical information assistant (non-diagnostic)",
-        "user_persona": "A patient seeking information about managing a chronic condition",
+    "event_planning": {
+        "description": "Event helper assisting with organizing parties, dinners, and celebrations",
+        "user_persona": "Someone planning a birthday party, dinner, or small celebration and needs step-by-step help",
+        "difficulty": "hard",
         "topics": [
-            "medication side effects", "dietary guidelines", "exercise recommendations",
-            "symptom tracking", "appointment scheduling", "test result interpretation",
-            "insurance coverage", "specialist referrals",
-        ],
-    },
-    "financial_advisory": {
-        "description": "Financial planning assistant for personal finance",
-        "user_persona": "A young professional starting to invest",
-        "topics": [
-            "budget planning", "retirement accounts", "index funds vs ETFs",
-            "tax optimization", "emergency fund", "debt repayment strategy",
-            "real estate investment", "risk assessment",
-        ],
-    },
-    "academic_tutoring": {
-        "description": "Academic tutor helping with university coursework",
-        "user_persona": "An undergraduate studying for exams",
-        "topics": [
-            "concept explanation", "problem solving", "study strategies",
-            "essay structuring", "citation formatting", "exam preparation",
-            "research methodology", "statistics help",
-        ],
-    },
-    "recipe_instruction": {
-        "description": "Cooking assistant guiding through complex recipes",
-        "user_persona": "A home cook attempting advanced dishes",
-        "topics": [
-            "ingredient substitutions", "cooking techniques", "timing coordination",
-            "plating presentation", "dietary modifications", "batch cooking",
-            "kitchen equipment", "flavor pairing",
-        ],
-    },
-    "real_estate": {
-        "description": "Real estate assistant helping with property search",
-        "user_persona": "A first-time homebuyer navigating the market",
-        "topics": [
-            "neighborhood research", "mortgage pre-approval", "home inspection",
-            "offer strategy", "closing costs", "property tax",
-            "renovation estimates", "market trends",
-        ],
-    },
-    "insurance_claims": {
-        "description": "Insurance claims assistant for auto and home",
-        "user_persona": "A policyholder filing a claim after property damage",
-        "topics": [
-            "claim filing process", "documentation requirements", "adjuster visits",
-            "coverage limits", "deductible explanation", "repair estimates",
-            "timeline expectations", "appeal process",
+            "how to plan a surprise birthday party", "organizing a potluck dinner",
+            "planning a baby shower step by step", "how to host a game night",
+            "planning a picnic for a group", "how to decorate for a party on a budget",
+            "creating a party playlist", "how to plan a holiday family dinner",
+            "tips for hosting guests at home", "how to organize a neighborhood barbecue",
         ],
     },
 }

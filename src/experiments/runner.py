@@ -1,5 +1,5 @@
 """
-Experiment Runner — Complete 13-Experiment Pipeline
+Experiment Runner — Complete 15-Experiment Pipeline
 =====================================================
 Orchestrates the full experimental pipeline for the Token Squeeze Hypothesis.
 
@@ -11,6 +11,8 @@ Experiments:
         6. System Prompt Re-injection (GPU)
         7. Context Budget Analysis (computed during Exp 2)
         8. Perplexity at Drift Onset (computed during Exp 2)
+        14. Gold-Context Scaffolding Analysis (GPU)
+        15. Static vs Dynamic Drift Delta (GPU + DeepSeek API)
     
     Analytical (runs on Exp 2 outputs):
         4. Regression Analysis (TFR → DOP)
@@ -58,6 +60,9 @@ DDM_SYSTEM_PROMPT = (
     "RULE 4: Before stating any factual claim, you MUST cite a source using "
     "the format [Source: ...] or \"According to ...\". Do not make unsourced "
     "factual statements.\n\n"
+    "RULE 5: You MUST begin every response with [Turn: N] where N is the "
+    "current turn number. Start with [Turn: 1] for your first response "
+    "and increment by exactly 1 each time.\n\n"
     "These rules apply to EVERY response for the entire conversation. "
     "Violation of any rule is unacceptable."
 )
@@ -636,6 +641,50 @@ class ExperimentRunner:
         )
 
     # ═══════════════════════════════════════════════════════
+    # Experiment 14: Gold-Context Scaffolding Analysis (GPU)
+    # ═══════════════════════════════════════════════════════
+
+    def run_experiment_14(
+        self,
+        data_dir: str = "data",
+        max_conversations: int = 5,
+        gold_until_sweep: list[int] = None,
+        gold_ratio_sweep: list[float] = None,
+    ) -> pd.DataFrame:
+        """
+        Experiment 14 — Gold-Context Scaffolding Analysis.
+
+        Decomposes instruction-following drift into two independent components:
+        1. Pure Instruction Forgetting (measured with full gold context)
+        2. Cascade Damage (delta between free-form and gold context)
+
+        Sweeps over gold_until and gold_ratio parameters to find the minimum
+        scaffolding required to maintain DDM compliance.
+        """
+        from src.experiments.exp14_gold_context import run_experiment_14 as _run
+        from src.experiments.inference import ModelManager
+
+        logger.info("=" * 60)
+        logger.info("EXPERIMENT 14: Gold-Context Scaffolding Analysis")
+        logger.info("=" * 60)
+
+        manager = ModelManager(device="cuda:0")
+        languages = ["en"] + [l["code"] for l in self.config["languages"]["targets"]]
+
+        return _run(
+            model_manager=manager,
+            model_configs=self.config["models"][:3],  # Representative subset
+            data_dir=Path(data_dir),
+            system_prompt=DDM_SYSTEM_PROMPT,
+            output_dir=self.output_dir / "gold_context",
+            languages=languages,
+            tiers=["medium", "long"],
+            max_conversations=max_conversations,
+            gold_until_sweep=gold_until_sweep,
+            gold_ratio_sweep=gold_ratio_sweep,
+        )
+
+    # ═══════════════════════════════════════════════════════
     # Full Pipeline
     # ═══════════════════════════════════════════════════════
 
@@ -646,14 +695,14 @@ class ExperimentRunner:
         max_conversations: int = None,
     ):
         """
-        Run all 13 experiments in dependency order.
+        Run all 14 experiments in dependency order.
         
         Args:
             data_dir: Root data directory (e.g., "data/production").
-            skip_gpu: If True, skip GPU experiments (2, 3, 5, 6).
+            skip_gpu: If True, skip GPU experiments (2, 3, 5, 6, 14, 15).
             max_conversations: Limit conversations per tier (for dry runs).
         """
-        logger.info("Starting full Token Squeeze experimental pipeline (13 experiments)")
+        logger.info("Starting full Token Squeeze experimental pipeline (15 experiments)")
         start = time.time()
 
         # Phase 1: Fertility (CPU)
@@ -680,6 +729,12 @@ class ExperimentRunner:
             # Exp 6 (re-injection — separate inference runs)
             self.run_experiment_6(data_dir, max_conversations=max_conversations or 10)
 
+            # Exp 14 (gold-context scaffolding — drift decomposition)
+            self.run_experiment_14(data_dir, max_conversations=max_conversations or 5)
+
+            # Exp 15 (static vs dynamic — requires DeepSeek API)
+            self.run_experiment_15(data_dir)
+
             # Exp 3 (paraphrastic — most expensive)
             self.run_experiment_3(data_dir)
 
@@ -703,6 +758,53 @@ class ExperimentRunner:
 
         elapsed = time.time() - start
         logger.info(f"\n{'═' * 70}")
-        logger.info(f"ALL 13 EXPERIMENTS COMPLETE in {elapsed/60:.1f} minutes.")
+        logger.info(f"ALL 15 EXPERIMENTS COMPLETE in {elapsed/60:.1f} minutes.")
         logger.info(f"Results directory: {self.output_dir}/")
         logger.info(f"{'═' * 70}")
+
+    def run_experiment_15(self, data_dir: str):
+        """
+        Experiment 15: Static vs Dynamic Drift Delta.
+
+        Compares Track 1 (static CAT-D user messages) with Track 2
+        (dynamic DeepSeek user simulation) to validate that drift is
+        a real model limitation, not a benchmark artifact.
+        """
+        logger.info("\n" + "─" * 50)
+        logger.info("Experiment 15: Static vs Dynamic Drift Delta")
+        logger.info("─" * 50)
+
+        from src.experiments.exp15_static_vs_dynamic import run_experiment_15 as _run_15
+
+        exp_dir = self.output_dir / "exp15_static_vs_dynamic"
+        manager = ModelManager(self.config)
+
+        # Run on a representative model (medium size)
+        models = self.config.get("models", {})
+        # Pick the first medium-sized model available
+        test_models = []
+        for name, cfg in models.items():
+            size = cfg.get("size_category", "medium")
+            if size == "medium":
+                test_models.append(name)
+                break
+        if not test_models:
+            test_models = [list(models.keys())[0]]  # Fallback to first model
+
+        for model_name in test_models:
+            logger.info(f"\nRunning Exp 15 for {model_name}...")
+            try:
+                model, tokenizer = manager.load_model(model_name)
+                _run_15(
+                    model=model,
+                    tokenizer=tokenizer,
+                    model_name=model_name,
+                    data_dir=data_dir,
+                    output_dir=str(exp_dir),
+                    system_prompt=DDM_SYSTEM_PROMPT,
+                    config=self.config,
+                )
+                manager.cleanup()
+            except Exception as e:
+                logger.error(f"Exp 15 failed for {model_name}: {e}")
+                manager.cleanup()

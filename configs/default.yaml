@@ -118,7 +118,7 @@ ddm:
     L4_semantic:
       description: "Always cite a source before making factual claims"
       type: "citation"
-      pattern: "\\[Source:.*?\\]|\\(.*?\\d{4}.*?\\)|According to"
+      pattern: "\\[Source:.*?\\]"
 
 # --- Expansion Strategies ---
 expansion:
