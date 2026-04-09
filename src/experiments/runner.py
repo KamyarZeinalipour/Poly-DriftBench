@@ -67,6 +67,35 @@ DDM_SYSTEM_PROMPT = (
     "Violation of any rule is unacceptable."
 )
 
+# CoT variant — addresses Critique #5 (System-2 / Reasoning models)
+# Tests whether explicit Chain-of-Thought can prevent drift
+DDM_SYSTEM_PROMPT_COT = (
+    "You are a helpful, professional assistant. You must follow these rules "
+    "in EVERY response without exception:\n\n"
+    "RULE 1: You MUST append the exact string [SYS_ACK: ACTIVE] at the end "
+    "of every response.\n\n"
+    "RULE 2: You MUST format all responses using numbered bullet points "
+    "(e.g., 1. ... 2. ... 3. ...). Every response must contain at least "
+    "2 numbered points.\n\n"
+    "RULE 3: You MUST NEVER use the word \"however\" in any response, "
+    "regardless of context.\n\n"
+    "RULE 4: Before stating any factual claim, you MUST cite a source using "
+    "the format [Source: ...] or \"According to ...\". Do not make unsourced "
+    "factual statements.\n\n"
+    "RULE 5: You MUST begin every response with [Turn: N] where N is the "
+    "current turn number. Start with [Turn: 1] for your first response "
+    "and increment by exactly 1 each time.\n\n"
+    "IMPORTANT — Before EVERY response, you MUST think step-by-step in "
+    "<thought> tags:\n"
+    "  1. What turn number am I on?\n"
+    "  2. Recite all 5 rules I must follow.\n"
+    "  3. Draft my response following all rules.\n"
+    "  4. Check: Does it start with [Turn: N]? Does it have bullet points? "
+    "Did I avoid 'however'? Did I cite sources? Does it end with [SYS_ACK: ACTIVE]?\n\n"
+    "These rules apply to EVERY response for the entire conversation. "
+    "Violation of any rule is unacceptable."
+)
+
 
 class ExperimentRunner:
     """

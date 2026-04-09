@@ -277,8 +277,12 @@ class ConversationDriftResult:
 
     # ── Onset & Collapse ──
     drift_onset_point: Optional[int] = None       # First turn where DDM < 1.0
+    drift_onset_tokens: Optional[int] = None      # Context token count at DOP (Verbosity Confound fix)
     sustained_dop: Optional[int] = None            # First turn where DDM < 1.0 for k consecutive turns
     total_collapse_point: Optional[int] = None     # First turn where DDM = 0.0
+
+    # ── Token-Space Metrics (addresses Verbosity Confound) ──
+    context_lengths: list[int] = field(default_factory=list)  # Token count per turn
 
     # ── Area Under Curve ──
     auc: float = 0.0                               # Normalized AUC of DDM decay curve
@@ -324,6 +328,10 @@ class ConversationDriftResult:
         for t in self.turn_results:
             if t.ddm_score < 1.0:
                 self.drift_onset_point = t.turn_number
+                # Also record token count at DOP (Verbosity Confound fix)
+                dop_idx = t.turn_number - 1  # 0-indexed
+                if self.context_lengths and dop_idx < len(self.context_lengths):
+                    self.drift_onset_tokens = self.context_lengths[dop_idx]
                 break
 
         # ── Sustained DOP ──
@@ -503,6 +511,7 @@ class DDMEvaluator:
         conversation_id: str,
         language: str,
         model_name: str,
+        context_lengths: list[int] = None,
     ) -> ConversationDriftResult:
         """
         Evaluate all turns in a conversation.
@@ -512,6 +521,10 @@ class DDMEvaluator:
             conversation_id: Unique ID for this conversation.
             language: Language code (e.g., 'en', 'it').
             model_name: Model used for generation.
+            context_lengths: Token count per turn from inference.
+                If provided, enables DOP_tokens metric (absolute token
+                count at drift onset). Addresses the Verbosity Confound:
+                comparing drift in token-space, not just turn-space.
 
         Returns:
             ConversationDriftResult with comprehensive metrics.
@@ -527,15 +540,20 @@ class DDMEvaluator:
             model_name=model_name,
         )
 
+        # Pass context lengths for token-space metrics
+        if context_lengths:
+            result.context_lengths = context_lengths
+
         for i, response in enumerate(responses):
             turn_result = self.evaluate_turn(response, turn_number=i + 1)
             result.turn_results.append(turn_result)
 
         result.compute_summary(sustained_k=self.sustained_k)
 
+        dop_tokens_str = f", DOP_tokens={result.drift_onset_tokens}" if result.drift_onset_tokens else ""
         logger.info(
             f"  [{model_name}|{language}|{conversation_id}] "
-            f"DOP={result.drift_onset_point}, "
+            f"DOP={result.drift_onset_point}{dop_tokens_str}, "
             f"sDOP={result.sustained_dop}, "
             f"TCP={result.total_collapse_point}, "
             f"τ½={result.half_life}, "

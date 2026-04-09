@@ -79,6 +79,12 @@ models:
     hf_id: "microsoft/Phi-3.5-mini-instruct"
     attention_type: "grouped_query"
     context_window: 131072
+  # System-2 Reasoning Model (addresses Critique #5: no reasoning models)
+  - name: "deepseek-r1-distill-8b"
+    hf_id: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+    attention_type: "grouped_query"
+    context_window: 131072
+    reasoning_model: true  # Uses hidden <think> CoT
 
 # --- Dataset ---
 dataset:
