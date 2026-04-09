@@ -627,6 +627,7 @@ def run_dynamic_inference(
     max_new_tokens: int = 512,
     temperature: float = 0.0,
     compute_perplexity: bool = False,
+    seed_first_message: str = None,
 ) -> InferenceResult:
     """
     Run inference with a live DeepSeek user simulator (Track 2).
@@ -645,6 +646,9 @@ def run_dynamic_inference(
         max_new_tokens: Max tokens per response.
         temperature: Sampling temperature.
         compute_perplexity: Whether to compute per-turn perplexity.
+        seed_first_message: If provided, use this exact message as the
+            first user message (from Track 1 static data) so both tracks
+            start from the same state.
 
     Returns:
         InferenceResult with responses and metrics.
@@ -667,8 +671,8 @@ def run_dynamic_inference(
     # Build conversation with system prompt
     conversation = [{"role": "system", "content": system_prompt}]
 
-    # Generate the first user message
-    first_msg = dynamic_user.generate_first_message()
+    # Generate the first user message — seeded from static track if available
+    first_msg = dynamic_user.generate_first_message(seed_message=seed_first_message)
     conversation.append({"role": "user", "content": first_msg})
 
     for turn_idx in range(num_turns):

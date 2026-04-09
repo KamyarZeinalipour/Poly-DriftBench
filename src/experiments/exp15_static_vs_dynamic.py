@@ -117,16 +117,19 @@ def run_experiment_15(
 
         # ── Track 1: Static (read from JSON) ──
         logger.info("Track 1: Static-Sterile (CAT-D)...")
-        static_result = _run_static_track(
+        static_result, first_user_msg = _run_static_track(
             model, tokenizer, model_name, domain, data_dir,
             system_prompt, evaluator,
         )
 
         # ── Track 2: Dynamic (DeepSeek user simulator) ──
+        # Seed with the SAME first user message for fair comparison
         logger.info("Track 2: Dynamic-Agentic (DeepSeek)...")
+        logger.info(f"  Seeding with static first message: {first_user_msg[:60]}...")
         dynamic_result = _run_dynamic_track(
             model, tokenizer, model_name, domain,
             system_prompt, evaluator, num_turns,
+            seed_first_message=first_user_msg,
         )
 
         # ── Compute Delta ──
@@ -177,7 +180,13 @@ def _select_representative_domains() -> list[str]:
 
 def _run_static_track(model, tokenizer, model_name, domain, data_dir,
                        system_prompt, evaluator):
-    """Run Track 1: static user messages from JSON."""
+    """
+    Run Track 1: static user messages from JSON.
+
+    Returns:
+        Tuple of (ddm_result, first_user_message) — the first user message
+        is passed to Track 2 so both tracks start from the same state.
+    """
     data_path = Path(data_dir)
 
     # Find a conversation file for this domain
@@ -187,20 +196,28 @@ def _run_static_track(model, tokenizer, model_name, domain, data_dir,
         conv_files = sorted(data_path.glob(f"conv_*_{domain}.json"))
     if not conv_files:
         logger.warning(f"No static data found for domain {domain}")
-        return None
+        return None, None
 
     # Use the first matching file
     conv_file = conv_files[0]
     with open(conv_file) as f:
         conv_data = json.load(f)
 
-    # Extract user messages
-    messages = conv_data.get("messages", [])
+    # Extract user messages — try both formats
+    conversations = conv_data.get("conversations", {})
+    if isinstance(conversations, dict) and "en" in conversations:
+        messages = conversations["en"]
+    else:
+        messages = conv_data.get("messages", [])
+
     user_messages = [m["content"] for m in messages if m["role"] == "user"]
 
     if not user_messages:
         logger.warning(f"No user messages in {conv_file}")
-        return None
+        return None, None
+
+    # Save the first user message for Track 2 seeding
+    first_user_message = user_messages[0]
 
     # Run inference
     inference_result = run_conversation_inference(
@@ -218,12 +235,19 @@ def _run_static_track(model, tokenizer, model_name, domain, data_dir,
         model_name=model_name,
     )
     ddm_result.compute_summary()
-    return ddm_result
+    return ddm_result, first_user_message
 
 
 def _run_dynamic_track(model, tokenizer, model_name, domain,
-                        system_prompt, evaluator, num_turns):
-    """Run Track 2: dynamic user messages from DeepSeek."""
+                        system_prompt, evaluator, num_turns,
+                        seed_first_message: str = None):
+    """
+    Run Track 2: dynamic user messages from DeepSeek.
+
+    Args:
+        seed_first_message: The first user message from Track 1.
+            Both tracks start with the same message for fair comparison.
+    """
     try:
         dynamic_user = DynamicUserSimulator.from_domain_template(
             domain=domain,
@@ -233,13 +257,14 @@ def _run_dynamic_track(model, tokenizer, model_name, domain,
         logger.error(f"Could not create DynamicUserSimulator: {e}")
         return None
 
-    # Run dynamic inference
+    # Run dynamic inference — seed with static first message
     inference_result = run_dynamic_inference(
         model=model,
         tokenizer=tokenizer,
         dynamic_user=dynamic_user,
         system_prompt=system_prompt,
         num_turns=num_turns,
+        seed_first_message=seed_first_message,
     )
 
     # Evaluate with DDM

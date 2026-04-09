@@ -117,10 +117,26 @@ Generate ONLY the user message. No quotes, no labels, just the raw message."""
         except ImportError:
             raise ImportError("openai package required: pip install openai")
 
-    def generate_first_message(self) -> str:
-        """Generate the opening user message to start the conversation."""
+    def generate_first_message(self, seed_message: str = None) -> str:
+        """
+        Get the opening user message to start the conversation.
+
+        Args:
+            seed_message: If provided, use this exact message instead of
+                generating one. This ensures Track 2 starts with the same
+                first message as Track 1 for fair DOP comparison in Exp 15.
+
+        Returns:
+            The first user message.
+        """
         self.current_turn = 1
 
+        # If seeded from static track, use the exact same first message
+        if seed_message:
+            logger.info("Using seeded first message from static track")
+            return seed_message
+
+        # Otherwise, generate via DeepSeek
         prompt = (
             f"Generate the FIRST message from a user who wants help with "
             f"{self.domain}. Their goal: {self.goal_state}. "

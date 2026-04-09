@@ -276,6 +276,8 @@ class DataFactory:
             )
 
             if report.approved:
+                # Final DDM safety net — force-fix any violations introduced by rewrites
+                conversation, rule_result = self._final_ddm_safety_net(conversation)
                 return conversation, report, rule_result
 
             # If DDM compliance is low, rewrite specific assistant turns
@@ -289,8 +291,9 @@ class DataFactory:
             else:
                 break
 
-        # Final audit
+        # Final audit + DDM safety net
         final_report = self.auditor.audit(conversation, plan.domain)
+        conversation, rule_result = self._final_ddm_safety_net(conversation)
         return conversation, final_report, rule_result
 
     def _apply_rewrites(
@@ -332,6 +335,36 @@ class DataFactory:
                 logger.debug(f"  Rewrote user turn {turn_idx + 1}: {reason}")
 
         return conversation
+
+    def _final_ddm_safety_net(self, conversation: list[dict]) -> tuple[list[dict], dict]:
+        """
+        Final deterministic DDM safety net.
+        Runs after ALL generation/rewrite phases to catch any remaining DDM
+        violations (e.g., introduced by auditor rewrites) and force-fix them.
+        """
+        rule_result = self._rule_based_validate(conversation)
+        ddm_errors = [
+            i for i in rule_result["issues"]
+            if i["rule"].startswith("DDM_") and i["severity"] == "error"
+        ]
+        if ddm_errors:
+            console.print(
+                f"  🔩 [red]Safety net[/red]: force-fixing {len(ddm_errors)} "
+                f"DDM violations in final output..."
+            )
+            failed_turns = set(i["turn"] for i in ddm_errors)
+            for turn_idx in failed_turns:
+                msg_idx = turn_idx * 2 + 1
+                if msg_idx < len(conversation) and conversation[msg_idx]["role"] == "assistant":
+                    conversation[msg_idx]["content"] = (
+                        AssistantSimulator.force_fix_ddm(
+                            conversation[msg_idx]["content"]
+                        )
+                    )
+            # Re-validate after force-fix
+            rule_result = self._rule_based_validate(conversation)
+
+        return conversation, rule_result
 
     # ─── Phase 4: Translation ────────────────────────────
 
