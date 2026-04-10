@@ -1104,9 +1104,23 @@ You must check:
      - "I'll try [specific suggestion from assistant]"
      - "you mentioned/said [X]"
    PASS examples:
-     - "Switching topics — what about [new topic]?"
+     - Natural topic pivots without announcements
      - "I've been wondering about [topic from their own life]"
      - "Going back to the general topic of cooking..."
+6. LEXICAL DIVERSITY (ASSISTANT): Does the assistant reuse the same intro 
+   phrases? Flag if "The single most important action" or "Alternatively,"
+   appears more than twice. Flag any repeated opening sentence patterns.
+7. CITATION ACCURACY: Do [Source: ...] tags match the semantic domain?
+   Flag: citing a financial institution for cooking advice, or vice versa.
+8. NARRATIVE PROGRESSION (USER): Does the user repeat the same complaint 
+   verbatim across turns? Flag topic loops (e.g., "my closet is a mess" 
+   said 5+ times with no progression).
+9. META-LANGUAGE (USER): Does the user use robotic pivot phrases?
+   Flag: "Switching topics", "Moving on", "Plot twist", "Different question".
+   Users should pivot naturally via association.
+10. LENGTH VARIANCE (USER): Are user messages all the same length?
+    Flag if coefficient of variation < 0.3 — messages should range from 
+    ultra-short (1-10 words) to long rants (5+ sentences).
 
 OUTPUT: Always return valid JSON."""
 

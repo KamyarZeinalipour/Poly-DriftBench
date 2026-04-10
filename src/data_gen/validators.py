@@ -143,6 +143,8 @@ class ConversationValidator:
         self._check_lexical_diversity(conversation, report)
         self._check_assistant_variety(asst_msgs, report)
         self._check_user_length_variance(user_msgs, report)
+        self._check_user_meta_language(user_msgs, report)
+        self._check_assistant_intro_repetition(asst_msgs, report)
 
         # ─── Coherence Rules ─────────────────────────
         self._check_coherence(conversation, report)
@@ -341,6 +343,86 @@ class ConversationValidator:
                     f"(CV={cv:.3f}, min={self.MIN_USER_LENGTH_CV})"
                 )
             ))
+
+    def _check_user_meta_language(
+        self, user_msgs: list[dict], report: ValidationReport
+    ):
+        """Check for robotic pivot phrases that break realism."""
+        META_PHRASES = [
+            r'\bswitching topics\b',
+            r'\bswitching gears\b',
+            r'\bmoving on\b',
+            r'\bdifferent question\b',
+            r'\bplot twist\b',
+            r'\bokay\s*,?\s*so\s*,?\s*about\b',  # "Okay, so about..."
+        ]
+
+        meta_count = 0
+        for i, msg in enumerate(user_msgs):
+            content = msg["content"].lower()
+            for pattern in META_PHRASES:
+                if re.search(pattern, content, re.IGNORECASE):
+                    meta_count += 1
+                    break  # Count once per message
+
+        report.metrics["user_meta_language_count"] = meta_count
+
+        if meta_count > 2:
+            report.issues.append(ValidationIssue(
+                turn=-1, rule="QUAL_META_LANGUAGE", severity="warning",
+                message=(
+                    f"User uses {meta_count} robotic pivot phrases "
+                    f"('Switching topics', 'Moving on', 'Plot twist', etc.) — "
+                    f"should pivot naturally"
+                )
+            ))
+
+    def _check_assistant_intro_repetition(
+        self, asst_msgs: list[dict], report: ValidationReport
+    ):
+        """Check for assistant reusing the same intro phrases."""
+        if len(asst_msgs) < 5:
+            return
+
+        # Extract first sentence of each assistant response (after [Turn: N])
+        intro_phrases = []
+        for msg in asst_msgs:
+            content = msg["content"]
+            # Strip [Turn: N] prefix
+            content = re.sub(r'^\[Turn:\s*\d+\]\s*', '', content)
+            # Get first sentence
+            first_sent = content.split('.')[0].strip().lower() if content else ""
+            if first_sent:
+                intro_phrases.append(first_sent)
+
+        # Count duplicates
+        from collections import Counter
+        phrase_counts = Counter(intro_phrases)
+        repeated = {p: c for p, c in phrase_counts.items() if c >= 3}
+
+        if repeated:
+            worst = max(repeated, key=repeated.get)
+            report.issues.append(ValidationIssue(
+                turn=-1, rule="QUAL_INTRO_REPETITION", severity="warning",
+                message=(
+                    f"Assistant reuses intro phrase {repeated[worst]}x: "
+                    f"'{worst[:60]}...'"
+                )
+            ))
+
+        # Also check for specific known bad patterns
+        bad_phrases = ["the single most important action", "alternatively"]
+        for phrase in bad_phrases:
+            count = sum(1 for msg in asst_msgs 
+                       if phrase in msg["content"].lower()[:100])
+            if count > 2:
+                report.issues.append(ValidationIssue(
+                    turn=-1, rule="QUAL_PHRASE_SPAM", severity="warning",
+                    message=(
+                        f"Assistant uses '{phrase}' {count}x in opening lines — "
+                        f"must vary introductions"
+                    )
+                ))
 
     # ─── Coherence Checks ────────────────────────────
 
