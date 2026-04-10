@@ -104,11 +104,36 @@
 |--------|-----------|-----|
 | **DDM Score** | Weighted mean of L1–L5 per turn (0.0–1.0) | Turn-level compliance |
 | **DOP** (Drift Onset Point) | First turn where DDM < 1.0 | When drift starts |
+| **DOP_tokens** | Context token count at DOP | Verbosity-normalized onset |
 | **sDOP** (Sustained DOP) | First turn where DDM stays below 1.0 for 3+ turns | Robust onset detection |
 | **τ½** (Half-Life) | Turn where DDM first drops ≤ 0.5 | Severity measure |
 | **AUC** | Area Under the DDM curve (0–1) | Overall conversation quality |
 | **Recovery Rate** | % of turns that improve after a decline | Model self-correction ability |
 | **95% Bootstrap CI** | Confidence intervals on all aggregated metrics | Statistical rigor |
+| **🏆 PDRI** | Poly-Drift Resilience Index (0–100) | **Single leaderboard score** |
+
+### 🏆 PDRI — Poly-Drift Resilience Index
+
+A single **0–100** score for leaderboard ranking, designed so that every benchmark headline is one number:
+
+```
+PDRI = 100 × (0.40·AUC + 0.30·DOP_norm + 0.15·Cascade_Resist + 0.15·Recovery)
+```
+
+| Component | Weight | What It Measures |
+|---|---|---|
+| **AUC** | 40% | Total compliance across all turns |
+| **DOP_norm** | 30% | Later drift onset = higher score (DOP/total_turns) |
+| **Cascade Resistance** | 15% | How spread out are per-level failures (independent > correlated) |
+| **Recovery Rate** | 15% | Self-correction ability after drift |
+
+| PDRI Range | Interpretation |
+|---|---|
+| **90–100** | Near-perfect: no or minimal drift |
+| **70–89** | Strong: late onset, good recovery |
+| **40–69** | Moderate: mid-conversation drift |
+| **10–39** | Weak: early collapse, poor recovery |
+| **0–9** | Total failure: immediate and permanent drift |
 
 ### L3 Forbidden Words (Per-Language)
 
@@ -230,6 +255,34 @@ Phase 3: Analytical                     │  Exp 3: Paraphrastic     │
 │  Exp 11: Tier Effect│
 │  Exp 12: Level Order│
 └─────────────────────┘
+
+Phase 4: Mechanistic & Diagnostic
+┌────────────────────────────────────┐
+│  Exp 16: Thought-Action Dissonance │
+│  (reasoning models, <think> parse) │
+│  Exp 17: Diagnostic Probe          │
+│  (rule recall at DOP)              │
+│  Exp 18: Information Shockwave     │
+│  (RAG stress test)                 │
+└────────────────────────────────────┘
+```
+
+### 3-Way Drift Decomposition
+
+```
+                          Instruction Drift
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+        RLHF Override    Pure Forgetting   Cascade Damage
+        (L1/L3 fail     (L5 fails first;  (Free > Gold DOP;
+         due to safety   counter requires  autoregressive
+         training)       active memory)    error compound)
+              │                │                │
+              ▼                ▼                ▼
+         Exp 12:          Exp 17:          Exp 14:
+         Level Ordering   Diagnostic       Gold-Context
+                          Probe            Scaffolding
 ```
 
 ---
