@@ -1,5 +1,5 @@
 """
-Experiment Runner — Complete 15-Experiment Pipeline
+Experiment Runner — Complete 18-Experiment Pipeline
 =====================================================
 Orchestrates the full experimental pipeline for the Token Squeeze Hypothesis.
 
@@ -13,6 +13,9 @@ Experiments:
         8. Perplexity at Drift Onset (computed during Exp 2)
         14. Gold-Context Scaffolding Analysis (GPU)
         15. Static vs Dynamic Drift Delta (GPU + DeepSeek API)
+        16. Thought-Action Dissonance — System-2 Profiling (GPU, reasoning models)
+        17. Diagnostic Probe — Memory Eviction vs Laziness (GPU)
+        18. Information Shockwave — RAG Stress Test (GPU)
     
     Analytical (runs on Exp 2 outputs):
         4. Regression Analysis (TFR → DOP)

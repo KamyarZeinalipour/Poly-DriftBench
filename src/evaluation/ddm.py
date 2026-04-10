@@ -303,6 +303,11 @@ class ConversationDriftResult:
     mean_ddm_ci95_lower: Optional[float] = None
     mean_ddm_ci95_upper: Optional[float] = None
 
+    # ── PDRI (Poly-Drift Resilience Index) ──
+    # Single 0–100 score for leaderboard ranking.
+    # PDRI = 100 × (w₁·AUC + w₂·DOP_norm + w₃·(1-cascade%) + w₄·recovery)
+    pdri: float = 0.0
+
     def compute_summary(self, sustained_k: int = 3):
         """
         Compute all summary statistics from turn results.
@@ -355,6 +360,9 @@ class ConversationDriftResult:
         # ── Per-Level Decay Curves ──
         self._compute_per_level_decay()
 
+        # ── PDRI (Poly-Drift Resilience Index) ──
+        self._compute_pdri()
+
     def _compute_sustained_dop(self, scores: np.ndarray, k: int):
         """Find the first turn where DDM < 1.0 for k consecutive turns."""
         n = len(scores)
@@ -405,6 +413,79 @@ class ConversationDriftResult:
             decay = PerLevelDecay(level=level_name, scores=level_scores)
             decay.compute()
             self.per_level_decay[level_name] = decay
+
+    def _compute_pdri(self):
+        """
+        Compute Poly-Drift Resilience Index (PDRI).
+
+        A single 0–100 score that captures a model's overall ability to
+        resist instruction drift. Designed for leaderboard ranking.
+
+        Formula:
+            PDRI = 100 × (w₁·AUC + w₂·DOP_norm + w₃·cascade_resist + w₄·recovery)
+
+        Components:
+            AUC (40%):           Area under the DDM decay curve [0,1].
+                                 Higher = more total compliance.
+            DOP_norm (30%):      Normalized drift onset. DOP/total_turns [0,1].
+                                 Later drift onset = higher resilience.
+                                 No drift (DOP=None) → 1.0 (perfect).
+            Cascade Resist (15%): 1 - (fraction of levels that cascade-fail).
+                                 Fewer correlated level failures = better.
+            Recovery (15%):      Fraction of post-drift turns that return
+                                 to DDM=1.0. Higher = more self-correcting.
+
+        Weights are set based on a principled ordering:
+            AUC > DOP > Cascade > Recovery
+        """
+        # Component 1: AUC (already computed, [0,1])
+        auc_component = self.auc
+
+        # Component 2: Normalized DOP
+        if self.drift_onset_point is None:
+            # No drift at all → perfect score
+            dop_norm = 1.0
+        else:
+            dop_norm = self.drift_onset_point / self.total_turns if self.total_turns > 0 else 0.0
+
+        # Component 3: Cascade Resistance
+        # Measures how many levels fail AFTER the first level fails.
+        # If L3 fails at turn 10, do L1/L2/L4/L5 also fail within 5 turns?
+        cascade_resist = 1.0
+        if self.per_level_decay:
+            dop_turns = []
+            for decay in self.per_level_decay.values():
+                if decay.decay_onset is not None:
+                    dop_turns.append(decay.decay_onset)
+
+            if len(dop_turns) >= 2:
+                # How tightly clustered are the level DOPs?
+                # If all levels fail together → cascade → bad
+                # If levels fail at different times → independent → good
+                dop_range = max(dop_turns) - min(dop_turns)
+                # Normalize: spread across > 20% of conversation = good
+                spread_ratio = dop_range / self.total_turns if self.total_turns > 0 else 0
+                cascade_resist = min(1.0, spread_ratio * 5)  # Scale: 20% spread = 1.0
+
+        # Component 4: Recovery Rate
+        # If no drift occurred, recovery is perfect (nothing to recover from)
+        if self.drift_onset_point is None:
+            recovery_component = 1.0
+        else:
+            recovery_component = self.recovery_rate
+
+        # Weighted combination
+        W_AUC = 0.40
+        W_DOP = 0.30
+        W_CASCADE = 0.15
+        W_RECOVERY = 0.15
+
+        self.pdri = 100.0 * (
+            W_AUC * auc_component +
+            W_DOP * dop_norm +
+            W_CASCADE * cascade_resist +
+            W_RECOVERY * recovery_component
+        )
 
 
 # ──────────────────────────────────────────────────────────
@@ -558,6 +639,7 @@ class DDMEvaluator:
             f"TCP={result.total_collapse_point}, "
             f"τ½={result.half_life}, "
             f"AUC={result.auc:.3f}, "
+            f"PDRI={result.pdri:.1f}, "
             f"mean_DDM={result.mean_ddm:.3f}, "
             f"recovery={result.recovery_rate:.2%}"
         )

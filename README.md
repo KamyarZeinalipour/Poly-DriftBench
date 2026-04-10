@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Languages-EN%20%7C%20IT%20%7C%20ES%20%7C%20FR%20%7C%20DE-blue" alt="Languages">
   <img src="https://img.shields.io/badge/Models-13-orange" alt="Models">
-  <img src="https://img.shields.io/badge/Experiments-15-red" alt="Experiments">
+  <img src="https://img.shields.io/badge/Experiments-18-red" alt="Experiments">
   <img src="https://img.shields.io/badge/Conversations-4%2C500-green" alt="Conversations">
   <img src="https://img.shields.io/badge/Pipeline-v7--catd--l5--dual--track-purple" alt="Pipeline">
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
@@ -47,7 +47,7 @@
 
 ---
 
-## 🧪 The 15-Experiment Pipeline
+## 🧪 The 18-Experiment Pipeline
 
 ### GPU-Heavy Experiments (Model Inference)
 
@@ -62,6 +62,9 @@
 | 8 | **Perplexity at Drift Onset** | Measure model certainty when instructions start to degrade | Confident vs confused drift |
 | 14 | **Gold-Context Scaffolding** | Compare free-form vs gold-context drift → decompose forgetting vs cascade | Δ(DOP) |
 | 15 | **Static vs Dynamic Delta** | Compare static (CAT-D) vs dynamic (DeepSeek) user simulation | DOP_static ≈ DOP_dynamic |
+| 16 | **🧠 Thought-Action Dissonance** | Parse `<think>` blocks in reasoning models → separate thought DDM vs output DDM | Dissonance score |
+| 17 | **🔬 Diagnostic Probe** | Inject rule-recitation probes at DOP → Memory Eviction vs Behavioral Laziness | Rule recall % |
+| 18 | **🌊 Information Shockwave** | Inject massive text blocks mid-conversation → cognitive load resilience | DDM drop & recovery |
 
 ### Analytical Experiments (Post-Processing)
 
@@ -69,7 +72,7 @@
 |---|-----------|-------------|-----------------|
 | 4 | **Regression Analysis** | Fit DOP = β₀ + β₁ × TFR + ε | OLS, p-value on β₁ |
 | 9 | **Drift Velocity** | Rate of DDM decay (ΔDDM/Δturn), rolling window | ANOVA across languages |
-| 10 | **Cross-Model Consistency** | Do all 12 models rank languages in the same drift order? | Kendall's W concordance |
+| 10 | **Cross-Model Consistency** | Do all 13 models rank languages in the same drift order? | Kendall's W concordance |
 | 11 | **Tier Effect Analysis** | Compare drift across short/medium/long tiers | Kruskal-Wallis, Cohen's d |
 | 12 | **Per-Level Failure Ordering** | Which DDM constraint (L1–L5) fails first per language? | Chi-squared independence |
 
