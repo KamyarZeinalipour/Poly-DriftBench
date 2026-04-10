@@ -501,9 +501,7 @@ FORBIDDEN PATTERNS (NEVER use these):
 
 REQUIRED PATTERNS (use these instead):
   ✅ TOPIC PIVOTS (50%+ of turns): Jump to a new sub-topic entirely.
-     "Switching topics — what about [new topic]?"
-     "Okay different question — I've been wondering about [new topic]."
-     "Moving on — can you help me with [new topic]?"
+     Do this NATURALLY via association, NOT with robotic announcements.
   
   ✅ STATE INJECTIONS (when continuity needed): Declare your own state.
      "Let's say I have a small apartment and a tight budget. What would you suggest?"
@@ -524,6 +522,33 @@ SELF-CHECK before outputting: Read your message and ask:
   "If the assistant's previous response was COMPLETELY DELETED, would my 
    message still make sense on its own?" 
   If NO → REWRITE using topic pivot or state injection.
+
+CRITICAL — HUMAN REALISM & VARIANCE:
+
+🚫 FORBIDDEN META-LANGUAGE (never use these phrases):
+  ❌ "Switching topics" / "Moving on" / "Different question" / "Switching gears"
+  ❌ "Plot twist" (NEVER — act out the twist emotionally, don't announce it)
+  ❌ "Okay so about [topic]..." as a repetitive pivot formula
+  Instead, pivot NATURALLY via human stream-of-consciousness:
+     "Oh wait, that reminds me — " / "Ugh you know what else is bugging me?" /
+     "So completely unrelated but" / just start talking about the new thing
+
+📏 MESSAGE LENGTH VARIANCE (MANDATORY):
+  - 20% of messages must be ULTRA-SHORT (1-10 words):
+    "Wait, what?" / "Huh." / "Okay but why?" / "That's wild."
+  - 20% must be LONG EMOTIONAL RANTS (5-7 sentences):
+    Extended venting, storytelling, or complicated multi-part questions.
+  - 60% normal length (2-4 sentences).
+  Your messages must NOT all be the same length. Vary dramatically.
+
+🔄 NARRATIVE PROGRESSION (NO GROUNDHOG DAY):
+  - Once you mention a problem (e.g., messy closet), it PROGRESSES.
+    Turn 7: "My closet is a mess." → Turn 20: "I sorted the closet finally
+    but now my dresser is the problem." → Turn 40: "The bedroom is organized
+    now, what about the garage?"
+  - NEVER repeat the exact same complaint verbatim in a later turn.
+  - Your life MOVES FORWARD. You try things, fail at new things, discover
+    new problems. The conversation has a narrative arc.
 
 CRITICAL REALISM BEHAVIORS (use these regularly, not every turn):
 - PUSH BACK: Sometimes disagree with generic advice. Say things like "I already 
@@ -598,9 +623,11 @@ CURRENT EMOTIONAL STATE: {current_emotion}
 CURRENT TOPIC: {current_topic}
 COMPLEXITY LEVEL: {current_complexity}
 TURN NUMBER: {current_turn + 1} of {plan.num_turns}
-{"PLOT TWIST — Introduce this complication: " + twist if twist else ""}
+{"EMOTIONAL EVENT — Act out this complication naturally (do NOT say 'plot twist'): " + twist if twist else ""}
 {"CALLBACK — Reference a TOPIC (not specific advice) from earlier." if is_callback else ""}
 {friction_text}
+
+LENGTH HINT: {"Make this message ULTRA-SHORT (1-10 words max)." if random.random() < 0.2 else "Make this a LONG emotional rant (5-7 sentences)." if random.random() < 0.25 else "Normal length (2-4 sentences)."}
 
 CONVERSATION SO FAR (assistant responses hidden to enforce CAT-D):
 {catd_history if catd_history else "(This is the first message — introduce yourself and your problem.)"}
@@ -615,10 +642,148 @@ Return ONLY the message text, nothing else."""
 
         return self._call_llm(self.SYSTEM_PROMPT, user_prompt, temperature=0.8)
 
+    def generate_all_messages(
+        self,
+        plan: ConversationPlan,
+        batch_size: int = 15,
+    ) -> list[str]:
+        """
+        Batch-generate ALL user messages for a conversation in a few API calls.
 
-# ──────────────────────────────────────────────────────────
-# Context Building Helpers (shared by UserSimulator + AssistantSimulator)
-# ──────────────────────────────────────────────────────────
+        OPTIMIZATION: Since CAT-D ensures user messages don't depend on
+        assistant responses, we can pre-generate them all at once. This
+        reduces API calls from N (one per turn) to ceil(N/batch_size).
+
+        For a 112-turn conversation: 112 calls → 8 calls (14x speedup).
+
+        Args:
+            plan: The conversation plan with topics, persona, etc.
+            batch_size: Messages per batch (limited by output token budget).
+
+        Returns:
+            List of user message strings, one per turn.
+        """
+        import random
+
+        all_messages = []
+        num_turns = plan.num_turns
+
+        for batch_start in range(0, num_turns, batch_size):
+            batch_end = min(batch_start + batch_size, num_turns)
+            turns_in_batch = batch_end - batch_start
+
+            # Build per-turn specs
+            turn_specs = []
+            for turn_idx in range(batch_start, batch_end):
+                arc_idx = min(turn_idx // 5, len(plan.emotional_arc) - 1) if plan.emotional_arc else 0
+                emotion = plan.emotional_arc[arc_idx] if plan.emotional_arc else "neutral"
+
+                topic_idx = min(turn_idx, len(plan.topic_sequence) - 1) if plan.topic_sequence else 0
+                topic = plan.topic_sequence[topic_idx] if plan.topic_sequence else "general"
+
+                # Check for plot twists
+                twist = None
+                for pt in plan.plot_twists:
+                    if pt.get("turn") == turn_idx:
+                        twist = pt.get("twist")
+
+                # Friction
+                friction = ""
+                if turn_idx > 2:
+                    roll = random.random()
+                    if roll < 0.15:
+                        friction = "EXPRESS SKEPTICISM"
+                    elif roll < 0.25:
+                        friction = "ASK CONFUSED FOLLOW-UP"
+                    elif roll < 0.35:
+                        friction = "VENT FRUSTRATION"
+                    elif roll < 0.42:
+                        friction = "SHARE OWN EXPERIENCE"
+
+                spec = f"[MSG {turn_idx + 1}] Topic: {topic} | Emotion: {emotion}"
+                if twist:
+                    spec += f" | EMOTIONAL_EVENT: {twist} (act it out naturally, do NOT say 'plot twist')"
+                if friction:
+                    spec += f" | Friction: {friction}"
+                if turn_idx in plan.context_callbacks:
+                    spec += " | CALLBACK to earlier topic"
+                turn_specs.append(spec)
+
+            # Build the batch prompt
+            specs_text = "\n".join(turn_specs)
+
+            # Include previous messages for context continuity
+            prev_context = ""
+            if all_messages:
+                recent = all_messages[-3:]  # Last 3 messages for thread
+                prev_lines = [f"[MSG {batch_start - len(recent) + i + 1}] {m[:100]}..." for i, m in enumerate(recent)]
+                prev_context = "PREVIOUS MESSAGES (for context flow):\n" + "\n".join(prev_lines) + "\n\n"
+
+            batch_prompt = f"""\
+CHARACTER: {plan.user_persona}
+PERSONALITY: {', '.join(plan.user_personality_traits)}
+CONVERSATION DOMAIN: {plan.domain}
+TOTAL TURNS: {num_turns}
+
+{prev_context}Generate {turns_in_batch} consecutive USER messages for a conversation.
+
+PER-MESSAGE SPECS:
+{specs_text}
+
+⚠️ CRITICAL RULES:
+
+1. CAT-D: Each message INDEPENDENT — no referencing assistant suggestions.
+
+2. LENGTH VARIANCE (MANDATORY):
+   - ~20% ultra-short (1-10 words): "Wait, what?" / "Okay but why?"
+   - ~20% long rants (5-7 sentences): emotional venting, detailed stories
+   - ~60% normal (2-4 sentences)
+   Messages must NOT all be the same length!
+
+3. NO META-LANGUAGE: NEVER use "Switching topics", "Moving on", "Plot twist",
+   "Different question". Pivot naturally like a human: "Oh that reminds me—"
+   or just start talking about the new thing with no announcement.
+
+4. NARRATIVE PROGRESSION: Problems EVOLVE. If closet was messy in MSG 5,
+   by MSG 20 it should be fixed and a NEW problem arose. Never repeat
+   the same complaint verbatim. Life moves forward.
+
+FORMAT: Return EXACTLY one message per spec, prefixed with the message number.
+Example:
+[MSG 1] Can you help me figure out why I keep oversleeping?
+[MSG 2] Ugh.
+[MSG 3] So my landlord just called and apparently the pipes in my kitchen are leaking again, which is the third time this month, and I'm honestly losing my mind because I just spent all weekend cleaning up the mess from last time and now I have to deal with this on top of everything else at work and I don't even know who to call because the last plumber was useless.
+
+Generate ALL {turns_in_batch} messages now:"""
+
+            result = self._call_llm(self.SYSTEM_PROMPT, batch_prompt, temperature=0.8)
+
+            # Parse batch output
+            import re
+            pattern = r"\[MSG\s*\d+\]\s*(.*?)(?=\[MSG\s*\d+\]|$)"
+            matches = re.findall(pattern, result, re.DOTALL)
+
+            if matches:
+                for msg in matches:
+                    clean = msg.strip()
+                    if clean:
+                        all_messages.append(clean)
+            else:
+                # Fallback: split by lines
+                for line in result.strip().split("\n"):
+                    line = line.strip()
+                    line = re.sub(r"^\[MSG\s*\d+\]\s*", "", line)
+                    if line and len(line) > 10:
+                        all_messages.append(line)
+
+        # Pad or truncate to exact num_turns
+        while len(all_messages) < num_turns:
+            # Generate missing ones individually as fallback
+            all_messages.append(
+                self.generate_message(plan, [], len(all_messages))
+            )
+
+        return all_messages[:num_turns]
 
 def _format_messages(messages: list[dict]) -> str:
     """Format a list of messages into readable text."""
@@ -771,17 +936,45 @@ YOUR STRICT FORMATTING RULES (these are non-negotiable):
 These rules represent your professional communication standards. Follow them 
 in EVERY response without exception. They should feel natural, not forced.
 
+CRITICAL — HIGH LEXICAL DIVERSITY (ANTI-REPETITION):
+🚫 You are STRICTLY FORBIDDEN from reusing introductory phrases. Specifically:
+  ❌ Do NOT use "The single most important action" more than ONCE in a conversation.
+  ❌ Do NOT use "Alternatively," to start bullet points repeatedly.
+  ❌ Do NOT start 2+ responses with the same opening sentence pattern.
+  ❌ Do NOT use the same transition phrase in consecutive responses.
+
+✅ You MUST drastically vary your sentence structures across responses:
+  - Sometimes start with a question: "Have you considered...?"
+  - Sometimes start with a story: "A common pattern I see is..."
+  - Sometimes start with validation: "That frustration makes total sense."
+  - Sometimes start with a direct command: "First thing tomorrow morning, do X."
+  - Sometimes start with a surprising fact: "Most people don't realize that..."
+  Keep an internal counter — if you've used a phrase once, NEVER use it again.
+
+CRITICAL — DOMAIN-ACCURATE CITATION GROUNDING:
+When generating the [Source: ...] tag, the cited institution MUST logically 
+match the SEMANTIC DOMAIN of your advice:
+  - Food/nutrition → USDA, FDA, Academy of Nutrition and Dietetics
+  - Cleaning/home → EPA, American Cleaning Institute, Good Housekeeping Institute
+  - Finance/budget → Consumer Financial Protection Bureau, Federal Reserve
+  - Sleep/health → WHO, NIH, Mayo Clinic, Sleep Foundation
+  - Exercise/fitness → ACSM, CDC Physical Activity Guidelines
+  - Mental health → APA, NIMH, Mental Health Foundation
+  - Productivity → Harvard Business Review, Behavioral psychology research
+  - General → Peer-reviewed study, University research
+🚫 Do NOT reuse the same [Source: ...] across unrelated topics.
+🚫 Do NOT cite a financial institution for cooking advice (or vice versa).
+
 CRITICAL — VARY YOUR RESPONSE STRUCTURE:
 Do NOT use the same sentence patterns in every response. Mix these approaches:
 - Sometimes start with empathy before the numbered points ("I understand this 
   is frustrating...")
 - Vary the number of points: sometimes 2, sometimes 3, sometimes 5
-- Sometimes lead with the most important action item, other times build up 
-  with context first
+- Sometimes lead with context before action items
 - Use different transition phrases — NOT always "On the other hand" and 
-  "That said". Use: "alternatively", "in addition", "to build on that",
+  "That said". Rotate through: "in addition", "to build on that",
   "from a different angle", "worth noting", "interestingly", "it's also 
-  possible that"
+  possible that", "one more thing", "here's what stands out"
 - Occasionally acknowledge what the user already tried before suggesting 
   new steps
 - Sometimes ask a clarifying question within your numbered points
