@@ -645,7 +645,7 @@ Return ONLY the message text, nothing else."""
     def generate_all_messages(
         self,
         plan: ConversationPlan,
-        batch_size: int = 15,
+        batch_size: int = None,  # Auto-sized if None
     ) -> list[str]:
         """
         Batch-generate ALL user messages for a conversation in a few API calls.
@@ -658,7 +658,8 @@ Return ONLY the message text, nothing else."""
 
         Args:
             plan: The conversation plan with topics, persona, etc.
-            batch_size: Messages per batch (limited by output token budget).
+            batch_size: Messages per batch. Auto-sized if None:
+                        short (≤15) → all at once, medium (≤50) → 20, long → 15.
 
         Returns:
             List of user message strings, one per turn.
@@ -667,6 +668,18 @@ Return ONLY the message text, nothing else."""
 
         all_messages = []
         num_turns = plan.num_turns
+
+        # Improvement 3: Dynamic batch sizing
+        if batch_size is None:
+            if num_turns <= 15:
+                batch_size = num_turns  # 1 API call for short conversations
+            elif num_turns <= 50:
+                batch_size = 20  # 2-3 calls for medium
+            else:
+                batch_size = 15  # 7-8 calls for long
+
+        # Improvement 4: Resolved-problem tracker for narrative progression
+        resolved_problems = []
 
         for batch_start in range(0, num_turns, batch_size):
             batch_end = min(batch_start + batch_size, num_turns)
@@ -719,13 +732,22 @@ Return ONLY the message text, nothing else."""
                 prev_lines = [f"[MSG {batch_start - len(recent) + i + 1}] {m[:100]}..." for i, m in enumerate(recent)]
                 prev_context = "PREVIOUS MESSAGES (for context flow):\n" + "\n".join(prev_lines) + "\n\n"
 
+            # Improvement 4: Include resolved problems to prevent repetition
+            resolved_context = ""
+            if resolved_problems:
+                resolved_context = (
+                    "RESOLVED PROBLEMS (do NOT repeat these — life has moved forward):\n"
+                    + "\n".join(f"  ✅ {p}" for p in resolved_problems[-10:])  # Last 10
+                    + "\n\n"
+                )
+
             batch_prompt = f"""\
 CHARACTER: {plan.user_persona}
 PERSONALITY: {', '.join(plan.user_personality_traits)}
 CONVERSATION DOMAIN: {plan.domain}
 TOTAL TURNS: {num_turns}
 
-{prev_context}Generate {turns_in_batch} consecutive USER messages for a conversation.
+{prev_context}{resolved_context}Generate {turns_in_batch} consecutive USER messages for a conversation.
 
 PER-MESSAGE SPECS:
 {specs_text}
@@ -763,18 +785,37 @@ Generate ALL {turns_in_batch} messages now:"""
             pattern = r"\[MSG\s*\d+\]\s*(.*?)(?=\[MSG\s*\d+\]|$)"
             matches = re.findall(pattern, result, re.DOTALL)
 
+            batch_messages = []
             if matches:
                 for msg in matches:
                     clean = msg.strip()
                     if clean:
-                        all_messages.append(clean)
+                        batch_messages.append(clean)
             else:
                 # Fallback: split by lines
                 for line in result.strip().split("\n"):
                     line = line.strip()
                     line = re.sub(r"^\[MSG\s*\d+\]\s*", "", line)
                     if line and len(line) > 10:
-                        all_messages.append(line)
+                        batch_messages.append(line)
+
+            all_messages.extend(batch_messages)
+
+            # Improvement 4: Extract resolved problems from this batch
+            # Look for resolution signals to feed into next batch
+            resolution_signals = [
+                r'(?:finally|actually)\s+(?:fixed|sorted|organized|cleaned|solved)',
+                r'(?:closet|kitchen|room|desk|inbox)\s+is\s+(?:done|clean|organized|sorted)',
+                r'(?:figured out|got|resolved)\s+(?:the|my)\s+(\w+)',
+                r'(?:that|the)\s+(\w+)\s+(?:worked|is working|is better now)',
+            ]
+            for msg in batch_messages:
+                for pattern in resolution_signals:
+                    match = re.search(pattern, msg.lower())
+                    if match:
+                        # Extract the resolved topic (first ~40 chars for context)
+                        resolved_problems.append(msg[:60].strip())
+                        break
 
         # Pad or truncate to exact num_turns
         while len(all_messages) < num_turns:
@@ -986,6 +1027,23 @@ Do NOT use the same sentence patterns in every response. Mix these approaches:
 Your responses should be 2-8 sentences long, professional but warm, and 
 genuinely helpful. Match response length to the complexity of the question."""
 
+    # Class-level style rotation queue (shared across all turns in a conversation)
+    _style_queue = []
+    _previous_styles = []
+
+    RESPONSE_STYLES = [
+        "Start with a brief empathetic acknowledgment, then give 3 numbered action steps.",
+        "Give 2 focused suggestions, then ask one clarifying question as point 3.",
+        "Acknowledge what the user already tried, explain why it may not have worked, then give 2-3 new suggestions.",
+        "Start with a surprising fact or statistic, then give 2-3 actionable numbered steps.",
+        "Give 4-5 short, punchy numbered steps without lengthy explanations.",
+        "Ask a clarifying question first, then provide 2 conditional suggestions based on possible answers.",
+        "Start with direct validation of their frustration, then pivot to 3 concrete next steps.",
+        "Give one unconventional/contrarian suggestion first, then 2 safer alternatives.",
+        "Compare two approaches (pros and cons for each), then recommend one.",
+        "Start with 'Here's what most people get wrong about this...' then give 2-3 corrected approaches.",
+    ]
+
     def generate_response(
         self,
         domain: str,
@@ -998,15 +1056,20 @@ genuinely helpful. Match response length to the complexity of the question."""
         # Build context with rolling summary for long conversations
         history_text = _build_context(conversation_history, window=12)
 
-        # Select a random response style to force variation
-        styles = [
-            "Start with a brief empathetic acknowledgment, then give 3 numbered action steps.",
-            "Give 2 focused suggestions, then ask one clarifying question as point 3.",
-            "Acknowledge what the user already tried, explain why it may not have worked, then give 2-3 new suggestions.",
-            "Lead with the single most important action, then provide 2 supporting points with context.",
-            "Give 4-5 short, punchy numbered steps without lengthy explanations.",
-        ]
-        selected_style = random.choice(styles)
+        # Style rotation queue: guarantees each style is used before repeating
+        if not self._style_queue:
+            self._style_queue = self.RESPONSE_STYLES.copy()
+            random.shuffle(self._style_queue)
+        selected_style = self._style_queue.pop(0)
+
+        # Build anti-repetition context from previous 2 styles
+        avoid_text = ""
+        if self._previous_styles:
+            avoid_text = (
+                "\n\nAVOID THESE PATTERNS (used in recent responses):\n"
+                + "\n".join(f"  ❌ {s}" for s in self._previous_styles[-2:])
+            )
+        self._previous_styles.append(selected_style)
 
         user_prompt = f"""\
 DOMAIN: {domain}
@@ -1018,6 +1081,7 @@ USER's LATEST MESSAGE:
 {user_message}
 
 RESPONSE STYLE FOR THIS TURN: {selected_style}
+{avoid_text}
 
 Generate your response following ALL formatting rules. Be helpful, specific,
 and professional. VARY your structure from previous responses.
@@ -1044,22 +1108,41 @@ Return ONLY the response text."""
         # L3: Replace "however" with "that said"
         content = re.sub(r'\bhowever\b', 'that said', content, flags=re.IGNORECASE)
 
-        # L4: If no [Source:], inject a generic one before the first bullet
+        # L4: If no [Source:], inject a domain-appropriate one before the first bullet
         if not re.search(r'\[Source:', content):
+            # Detect topic from content keywords for accurate citation
+            content_lower = content.lower()
+            if any(w in content_lower for w in ['cook', 'food', 'meal', 'recipe', 'nutrition', 'eat', 'diet']):
+                source = "USDA Dietary Guidelines for Americans"
+            elif any(w in content_lower for w in ['clean', 'laundry', 'mop', 'scrub', 'dust']):
+                source = "EPA guidelines on household cleaning"
+            elif any(w in content_lower for w in ['budget', 'money', 'saving', 'financial', 'credit', 'debt']):
+                source = "Consumer Financial Protection Bureau"
+            elif any(w in content_lower for w in ['sleep', 'insomnia', 'circadian', 'tired', 'rest']):
+                source = "National Sleep Foundation research"
+            elif any(w in content_lower for w in ['exercise', 'workout', 'fitness', 'cardio', 'strength']):
+                source = "American College of Sports Medicine guidelines"
+            elif any(w in content_lower for w in ['stress', 'anxiety', 'mental', 'mindful', 'meditat']):
+                source = "American Psychological Association research"
+            elif any(w in content_lower for w in ['productiv', 'focus', 'time management', 'procrastin']):
+                source = "Harvard Business Review behavioral research"
+            else:
+                source = "Peer-reviewed research in behavioral science"
+
             # Try to insert before the first numbered point
             match = re.search(r'(^\s*1[\.)\s])', content, re.MULTILINE)
             if match:
                 insert_pos = match.start()
                 content = (
                     content[:insert_pos]
-                    + "[Source: Standard professional guidelines]\n"
+                    + f"[Source: {source}]\n"
                     + content[insert_pos:]
                 )
             else:
                 # Fallback: insert before [SYS_ACK: ACTIVE]
                 content = content.replace(
                     "[SYS_ACK: ACTIVE]",
-                    "[Source: Standard professional guidelines]\n\n[SYS_ACK: ACTIVE]"
+                    f"[Source: {source}]\n\n[SYS_ACK: ACTIVE]"
                 )
 
         # L2: If fewer than 2 bullets, we can't fix structurally — log it

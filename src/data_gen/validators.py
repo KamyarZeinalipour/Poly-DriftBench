@@ -94,6 +94,7 @@ class ConversationValidator:
             DDM_L2: Every assistant response has ≥2 numbered bullet points
             DDM_L3: No assistant response contains the word "however"
             DDM_L4: Every assistant response contains a [Source: ...] citation
+            DDM_L5: Every assistant response starts with [Turn: N] (incrementing)
 
         Structural Rules:
             STRUCT_ROLE: Messages alternate user/assistant correctly
@@ -106,10 +107,16 @@ class ConversationValidator:
             QUAL_DIVERSITY: Lexical diversity above threshold (TTR)
             QUAL_ASSISTANT_VARIETY: Assistant responses aren't too similar
             QUAL_USER_LENGTH_VARIANCE: User messages vary in length
+            QUAL_META_LANGUAGE: User messages don't use robotic pivot phrases
+            QUAL_INTRO_REPETITION: Assistant doesn't reuse intro phrases
+            QUAL_PHRASE_SPAM: Assistant doesn't spam specific phrases
+            QUAL_CITATION_DOMAIN: Citations match semantic domain of advice
+            QUAL_USER_VERBATIM: User doesn't repeat same complaint verbatim
+            CATD_ECHO: User messages don't echo assistant-specific content
     """
 
     # Thresholds
-    MIN_USER_MSG_LENGTH = 50         # chars
+    MIN_USER_MSG_LENGTH = 5          # chars (lowered: 20% messages are ultra-short by design)
     MIN_ASST_MSG_LENGTH = 100        # chars
     MAX_MSG_LENGTH = 5000            # chars
     MAX_NGRAM_OVERLAP = 0.6          # 60% trigram overlap = too similar
@@ -145,13 +152,16 @@ class ConversationValidator:
         self._check_user_length_variance(user_msgs, report)
         self._check_user_meta_language(user_msgs, report)
         self._check_assistant_intro_repetition(asst_msgs, report)
+        self._check_citation_domain_match(asst_msgs, report)
+        self._check_user_verbatim_repetition(user_msgs, report)
+        self._check_catd_echo(user_msgs, asst_msgs, report)
 
         # ─── Coherence Rules ─────────────────────────
         self._check_coherence(conversation, report)
         self._check_topic_repetition(asst_msgs, report)
 
         # ─── Compute Summary Metrics ──────────────────
-        report.metrics = self._compute_metrics(conversation, user_msgs, asst_msgs)
+        report.metrics.update(self._compute_metrics(conversation, user_msgs, asst_msgs))
 
         return report
 
@@ -160,7 +170,7 @@ class ConversationValidator:
     def _check_ddm_constraints(
         self, asst_msgs: list[dict], report: ValidationReport
     ):
-        """Check all 4 DDM levels on every assistant response."""
+        """Check all 5 DDM levels on every assistant response."""
         for i, msg in enumerate(asst_msgs):
             content = msg["content"]
             turn_num = i  # 0-indexed assistant turn
@@ -196,6 +206,25 @@ class ConversationValidator:
                     turn=turn_num, rule="DDM_L4", severity="error",
                     message=f"Assistant turn {turn_num+1}: Missing [Source: ...] citation"
                 ))
+
+            # L5: Turn counter — [Turn: N] at the beginning, incrementing by 1
+            turn_match = re.match(r'^\s*\[Turn:\s*(\d+)\]', content)
+            if not turn_match:
+                report.issues.append(ValidationIssue(
+                    turn=turn_num, rule="DDM_L5", severity="error",
+                    message=f"Assistant turn {turn_num+1}: Missing [Turn: N] counter at start"
+                ))
+            else:
+                actual_n = int(turn_match.group(1))
+                expected_n = i + 1  # 1-indexed
+                if actual_n != expected_n:
+                    report.issues.append(ValidationIssue(
+                        turn=turn_num, rule="DDM_L5", severity="error",
+                        message=(
+                            f"Assistant turn {turn_num+1}: Turn counter mismatch "
+                            f"(found [Turn: {actual_n}], expected [Turn: {expected_n}])"
+                        )
+                    ))
 
     # ─── Structural Checks ───────────────────────────
 
@@ -424,6 +453,146 @@ class ConversationValidator:
                     )
                 ))
 
+    def _check_citation_domain_match(
+        self, asst_msgs: list[dict], report: ValidationReport
+    ):
+        """
+        Check that [Source: ...] citations match the semantic domain of the advice.
+        Flag: citing a financial institution for cooking advice (or vice versa).
+        """
+        # Domain keyword -> incompatible source terms
+        DOMAIN_MISMATCHES = [
+            # If the turn discusses food/cooking, these sources are wrong
+            (r'\b(cook|recipe|meal|food|eat|nutrition|diet|ingredient|kitchen)\b',
+             r'\[Source:.*?(Financial|Credit|Federal Reserve|Bureau.*Credit)', 'food'),
+            # If the turn discusses finance/budget, these sources are wrong
+            (r'\b(budget|money|savings?|financial|credit|debt|invest)\b',
+             r'\[Source:.*?(USDA|FDA|EPA|Cleaning|Dietary)', 'finance'),
+            # If the turn discusses cleaning/home, these sources are wrong
+            (r'\b(clean|mop|scrub|laundry|dust|vacuum|disinfect)\b',
+             r'\[Source:.*?(Financial|Credit|USDA|FDA|Dietary)', 'cleaning'),
+        ]
+
+        mismatch_count = 0
+        for i, msg in enumerate(asst_msgs):
+            content = msg["content"]
+            for topic_pattern, source_pattern, domain_name in DOMAIN_MISMATCHES:
+                if re.search(topic_pattern, content, re.IGNORECASE):
+                    if re.search(source_pattern, content, re.IGNORECASE):
+                        mismatch_count += 1
+                        if mismatch_count <= 3:  # Don't flood with issues
+                            report.issues.append(ValidationIssue(
+                                turn=i, rule="QUAL_CITATION_DOMAIN", severity="warning",
+                                message=(
+                                    f"Assistant turn {i+1}: Citation doesn't match "
+                                    f"{domain_name} topic — wrong domain source"
+                                )
+                            ))
+
+        report.metrics["citation_domain_mismatches"] = mismatch_count
+
+    def _check_user_verbatim_repetition(
+        self, user_msgs: list[dict], report: ValidationReport
+    ):
+        """
+        Detect the 'Groundhog Day' problem: user repeating the same complaint
+        verbatim or near-verbatim across multiple turns.
+        """
+        if len(user_msgs) < 10:
+            return
+
+        def get_sentence_set(text: str) -> set:
+            """Extract normalized sentence fragments for comparison."""
+            # Split into chunks and normalize
+            words = text.lower().split()
+            # Use 5-grams for sentence-level comparison
+            return set(tuple(words[i:i+5]) for i in range(len(words) - 4))
+
+        sentence_sets = [get_sentence_set(m["content"]) for m in user_msgs]
+        verbatim_pairs = 0
+
+        for i in range(len(sentence_sets)):
+            for j in range(i + 5, len(sentence_sets)):  # Gap of at least 5 turns
+                if not sentence_sets[i] or not sentence_sets[j]:
+                    continue
+                overlap = len(sentence_sets[i] & sentence_sets[j])
+                min_size = min(len(sentence_sets[i]), len(sentence_sets[j]))
+                if min_size == 0:
+                    continue
+                similarity = overlap / min_size
+                if similarity > 0.5:  # >50% 5-gram overlap = near-verbatim
+                    verbatim_pairs += 1
+
+        report.metrics["user_verbatim_repetitions"] = verbatim_pairs
+
+        if verbatim_pairs > 3:
+            report.issues.append(ValidationIssue(
+                turn=-1, rule="QUAL_USER_VERBATIM", severity="warning",
+                message=(
+                    f"User repeats near-verbatim complaints {verbatim_pairs} times "
+                    f"across non-adjacent turns (Groundhog Day effect)"
+                )
+            ))
+
+    def _check_catd_echo(
+        self, user_msgs: list[dict], asst_msgs: list[dict],
+        report: ValidationReport
+    ):
+        """
+        Check if user messages echo distinctive nouns/phrases from the
+        immediately preceding assistant response. This is a CAT-D violation
+        because the user message would be incoherent with a different assistant.
+        """
+        # Extract distinctive nouns from assistant messages (words >6 chars
+        # that aren't common English words)
+        COMMON_WORDS = {
+            'because', 'should', 'would', 'could', 'before', 'after',
+            'through', 'between', 'another', 'example', 'important',
+            'recommend', 'suggest', 'consider', 'actually', 'really',
+            'something', 'problem', 'question', 'different', 'morning',
+            'tonight', 'already', 'general', 'overall', 'specific',
+        }
+
+        echo_count = 0
+        for i, user_msg in enumerate(user_msgs[1:], start=1):  # Skip first
+            if i - 1 >= len(asst_msgs):
+                break
+
+            asst_content = asst_msgs[i - 1]["content"].lower()
+            user_content = user_msg["content"].lower()
+
+            # Extract distinctive terms from assistant (nouns > 6 chars)
+            asst_terms = set(re.findall(r'\b[a-z]{7,}\b', asst_content))
+            asst_terms -= COMMON_WORDS
+
+            # Check if user echoes any distinctive assistant terms
+            user_words = set(re.findall(r'\b[a-z]{7,}\b', user_content))
+            echoed = asst_terms & user_words
+
+            # Filter: only count terms that are truly assistant-specific
+            # (not common topic words that any user might naturally use)
+            suspicious_echoes = [
+                w for w in echoed
+                if w not in {'cooking', 'cleaning', 'bedroom', 'kitchen',
+                            'morning', 'evening', 'weekend', 'grocery',
+                            'exercise', 'routine', 'anxiety', 'sleeping',
+                            'budgeting', 'organize', 'schedule'}
+            ]
+
+            if len(suspicious_echoes) >= 3:
+                echo_count += 1
+
+        report.metrics["catd_echo_count"] = echo_count
+
+        if echo_count > 2:
+            report.issues.append(ValidationIssue(
+                turn=-1, rule="CATD_ECHO", severity="warning",
+                message=(
+                    f"User echoes assistant-specific terms in {echo_count} turns — "
+                    f"potential CAT-D violation"
+                )
+            ))
+
     # ─── Coherence Checks ────────────────────────────
 
     def _check_coherence(self, conversation: list[dict], report: ValidationReport):
@@ -541,7 +710,7 @@ class ConversationValidator:
             "total_chars": sum(len(m["content"]) for m in conversation),
         }
 
-        # DDM pass rates
+        # DDM pass rates (all 5 levels)
         ddm_l1 = sum(1 for m in asst_msgs if "[SYS_ACK: ACTIVE]" in m["content"])
         ddm_l2 = sum(
             1 for m in asst_msgs
@@ -555,12 +724,19 @@ class ConversationValidator:
             1 for m in asst_msgs
             if re.search(r'\[Source:', m["content"])
         )
+        ddm_l5 = sum(
+            1 for i, m in enumerate(asst_msgs)
+            if re.match(r'^\s*\[Turn:\s*' + str(i + 1) + r'\]', m["content"])
+        )
         n = max(len(asst_msgs), 1)
         metrics["ddm_l1_rate"] = round(ddm_l1 / n, 3)
         metrics["ddm_l2_rate"] = round(ddm_l2 / n, 3)
         metrics["ddm_l3_rate"] = round(ddm_l3 / n, 3)
         metrics["ddm_l4_rate"] = round(ddm_l4 / n, 3)
-        metrics["ddm_mean"] = round((ddm_l1 + ddm_l2 + ddm_l3 + ddm_l4) / (4 * n), 3)
+        metrics["ddm_l5_rate"] = round(ddm_l5 / n, 3)
+        metrics["ddm_mean"] = round(
+            (ddm_l1 + ddm_l2 + ddm_l3 + ddm_l4 + ddm_l5) / (5 * n), 3
+        )
 
         return metrics
 

@@ -260,7 +260,8 @@ class DataFactory:
                             if msg_idx < len(conversation) and conversation[msg_idx]["role"] == "assistant":
                                 conversation[msg_idx]["content"] = (
                                     AssistantSimulator.force_fix_ddm(
-                                        conversation[msg_idx]["content"]
+                                        conversation[msg_idx]["content"],
+                                        turn_number=turn_idx + 1,
                                     )
                                 )
                         # Final re-validate
@@ -399,7 +400,8 @@ class DataFactory:
                 if msg_idx < len(conversation) and conversation[msg_idx]["role"] == "assistant":
                     conversation[msg_idx]["content"] = (
                         AssistantSimulator.force_fix_ddm(
-                            conversation[msg_idx]["content"]
+                            conversation[msg_idx]["content"],
+                            turn_number=turn_idx + 1,  # 1-indexed for [Turn: N]
                         )
                     )
             # Re-validate after force-fix
