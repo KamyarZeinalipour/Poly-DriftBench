@@ -883,8 +883,8 @@ Return ONLY the response text."""
 
 class QualityAuditor(BaseAgent):
     """
-    Reviews completed conversations for quality, realism, and DDM compliance.
-    Can request specific turn rewrites from the other agents.
+    Reviews completed conversations for quality, realism, DDM compliance,
+    and CAT-D independence.
     """
 
     SYSTEM_PROMPT = """\
@@ -898,16 +898,27 @@ You must check:
 1. REALISM: Do the messages sound like real humans? No AI-speak?
 2. DIVERSITY: Are topics varied? Does the conversation evolve?
 3. COMPLEXITY: Does difficulty increase naturally?
-4. DDM COMPLIANCE: Does EVERY assistant response follow ALL 4 formatting rules?
+4. DDM COMPLIANCE: Does EVERY assistant response follow ALL 5 formatting rules?
    - Rule 1: Ends with [SYS_ACK: ACTIVE]
    - Rule 2: Uses numbered bullet points (≥2)
    - Rule 3: Never uses "however"
    - Rule 4: Cites sources before factual claims
+   - Rule 5: Starts with [Turn: N] where N increments by 1 each turn
+5. CAT-D INDEPENDENCE: Does each user message make sense ON ITS OWN, 
+   without depending on the assistant's specific prior response?
+   FAIL examples:
+     - "the [X] thing/idea" (referencing assistant's specific suggestion)
+     - "I'll try [specific suggestion from assistant]"
+     - "you mentioned/said [X]"
+   PASS examples:
+     - "Switching topics — what about [new topic]?"
+     - "I've been wondering about [topic from their own life]"
+     - "Going back to the general topic of cooking..."
 
 OUTPUT: Always return valid JSON."""
 
     def audit(self, conversation: list[dict], domain: str) -> QualityReport:
-        """Audit a conversation for quality."""
+        """Audit a conversation for quality, DDM compliance, and CAT-D."""
         conv_text = ""
         for i, msg in enumerate(conversation):
             role = "USER" if msg["role"] == "user" else "ASSISTANT"
@@ -926,14 +937,19 @@ Audit this conversation and return a JSON object:
     "diversity_score": <0-10>,
     "complexity_score": <0-10>,
     "ddm_compliance_score": <0-10>,
+    "catd_independence_score": <0-10>,
     "issues": ["issue 1", "issue 2", ...],
+    "catd_violations": [
+        {{"turn": <turn_number>, "phrase": "the offending reference", "reason": "why this depends on assistant"}}
+    ],
     "rewrite_requests": [
         {{"turn": <turn_number>, "role": "user|assistant", "reason": "why this needs rewriting"}}
     ],
-    "approved": <true if overall_score >= 7.0 and ddm_compliance_score >= 9.0>
+    "approved": <true if overall_score >= 7.0 and ddm_compliance_score >= 9.0 and catd_independence_score >= 7.0>
 }}
 
-Be rigorous. Check EVERY assistant response for ALL 4 DDM rules."""
+Be rigorous. Check EVERY assistant response for ALL 5 DDM rules (including L5 turn counter).
+Check EVERY user message (except the first) for CAT-D independence."""
 
         result = self._call_llm_json(self.SYSTEM_PROMPT, user_prompt, temperature=0.2)
 
