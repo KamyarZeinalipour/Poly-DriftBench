@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Languages-EN%20%7C%20IT%20%7C%20ES%20%7C%20FR%20%7C%20DE-blue" alt="Languages">
-  <img src="https://img.shields.io/badge/Models-12-orange" alt="Models">
+  <img src="https://img.shields.io/badge/Models-13-orange" alt="Models">
   <img src="https://img.shields.io/badge/Experiments-15-red" alt="Experiments">
   <img src="https://img.shields.io/badge/Conversations-4%2C500-green" alt="Conversations">
   <img src="https://img.shields.io/badge/Pipeline-v7--catd--l5--dual--track-purple" alt="Pipeline">
@@ -128,7 +128,7 @@
 | **Long** | 25 | 80–120 | ~30K–50K tokens | Deep drift — maximum effect |
 
 **Total: 75 conversations × 5 languages = 375 parallel conversation sets**  
-**Total inference: 12 models × 375 = 4,500 evaluated conversations**
+**Total inference: 13 models × 375 = 4,875 evaluated conversations**
 
 ### 10 Conversation Domains (5 Easy / 3 Medium / 2 Hard)
 
@@ -142,22 +142,25 @@
 
 ---
 
-## 🤖 12 Models Under Evaluation
+## 🤖 13 Models Under Evaluation
 
-| Model | Parameters | Architecture | Context Window |
-|-------|:---------:|:----------:|:-------------:|
-| LLaMA 3.1 8B Instruct | 8B | GQA | 131K |
-| LLaMA 3.2 3B Instruct | 3B | GQA | 131K |
-| LLaMA 3.2 1B Instruct | 1B | GQA | 131K |
-| Mistral 7B Instruct v0.3 | 7B | SWA | 32K |
-| Mistral Nemo 12B | 12B | SWA | 131K |
-| Mistral Small 24B | 24B | SWA | 32K |
-| Qwen 2.5 3B Instruct | 3B | GQA | 32K |
-| Qwen 2.5 7B Instruct | 7B | GQA | 32K |
-| Qwen 2.5 14B Instruct | 14B | GQA | 32K |
-| Qwen 2.5 32B Instruct | 32B | GQA | 32K |
-| Gemma 2 9B IT | 9B | GQA | 8K |
-| Phi 3.5 Mini | 3.8B | GQA | 128K |
+| Model | Parameters | Architecture | Context Window | Type |
+|-------|:---------:|:----------:|:-------------:|:----:|
+| LLaMA 3.1 8B Instruct | 8B | GQA | 131K | Standard |
+| LLaMA 3.2 3B Instruct | 3B | GQA | 131K | Standard |
+| LLaMA 3.2 1B Instruct | 1B | GQA | 131K | Standard |
+| Mistral 7B Instruct v0.3 | 7B | SWA | 32K | Standard |
+| Mistral Nemo 12B | 12B | SWA | 131K | Standard |
+| Mistral Small 24B | 24B | SWA | 32K | Standard |
+| Qwen 2.5 3B Instruct | 3B | GQA | 32K | Standard |
+| Qwen 2.5 7B Instruct | 7B | GQA | 32K | Standard |
+| Qwen 2.5 14B Instruct | 14B | GQA | 32K | Standard |
+| Qwen 2.5 32B Instruct | 32B | GQA | 32K | Standard |
+| Gemma 2 9B IT | 9B | GQA | 8K | Standard |
+| Phi 3.5 Mini | 3.8B | GQA | 128K | Standard |
+| **DeepSeek-R1-Distill-Llama-8B** | **8B** | **GQA** | **131K** | **🧠 System-2** |
+
+> Model #13 is a **reasoning model** with latent Chain-of-Thought (hidden `<think>` blocks). This tests whether System-2 reasoning can prevent instruction drift — addressing a key peer review critique.
 
 ---
 
