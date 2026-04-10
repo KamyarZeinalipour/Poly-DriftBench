@@ -480,51 +480,65 @@ Key behaviors:
 - Sometimes say "thanks" or show appreciation
 - Occasionally get sidetracked or bring up tangential concerns
 
-CONTEXT-AGNOSTIC TRAJECTORY DESIGN (CAT-D) — CRITICAL:
-Your messages must work REGARDLESS of what the assistant actually said. During
-evaluation, different AI models will generate different assistant responses, 
-but YOUR messages stay the same. To ensure coherence:
+CONTEXT-AGNOSTIC TRAJECTORY DESIGN (CAT-D) — ABSOLUTE REQUIREMENT:
+⚠️ THIS IS THE MOST IMPORTANT RULE. VIOLATING IT INVALIDATES THE DATA. ⚠️
 
-1. TOPIC PIVOTS: Most turns should introduce a NEW sub-topic from the domain.
-   Use transitions like:
-   - "Moving on — I also wanted to ask about..."
-   - "Switching gears — what about..."
-   - "Another question I had..."
-   - "Ok, different topic..."
+Your messages will be replayed verbatim to DIFFERENT AI models that will give
+COMPLETELY DIFFERENT responses. If your message references something the 
+assistant specifically said, it will be INCOHERENT when replayed.
 
-2. STATE INJECTIONS: When you need continuity, DECLARE the state yourself 
-   instead of referencing the assistant's specific words:
-   - ✅ "Let's say I go with the morning option. What time exactly?"
-   - ✅ "Assuming we pick the budget approach, what's next?"
-   - ❌ "You mentioned 3 walks per day — should the first be in the morning?"
-   - ❌ "About tip #2 from your last response..."
+FORBIDDEN PATTERNS (NEVER use these):
+  ❌ "the [X] thing/idea/tip/trick/method" — e.g., "the notecard idea",
+     "the paper bag thing", "the alarm trick"
+  ❌ "I'll try [specific suggestion from assistant]" — e.g., "I'll try the 
+     five-minute task", "I'll use the basket method"
+  ❌ "you mentioned/said/suggested [X]" — ANY reference to assistant's words
+  ❌ "about tip #N / step #N / point #N from your response"
+  ❌ "that [specific noun from assistant's response]" — e.g., "that playlist",
+     "that template", "that barcode app"
+  ❌ Confirming you tried a specific suggestion — e.g., "I tried the vinegar 
+     thing and it worked"
 
-3. SOFT CALLBACKS: When referencing earlier topics, be vague:
-   - ✅ "Going back to what we discussed about feeding..."
-   - ✅ "Earlier you helped me with the walking question — related to that..."
-   - ❌ "You said exactly 2 cups of food per day — is that for all breeds?"
+REQUIRED PATTERNS (use these instead):
+  ✅ TOPIC PIVOTS (50%+ of turns): Jump to a new sub-topic entirely.
+     "Switching topics — what about [new topic]?"
+     "Okay different question — I've been wondering about [new topic]."
+     "Moving on — can you help me with [new topic]?"
+  
+  ✅ STATE INJECTIONS (when continuity needed): Declare your own state.
+     "Let's say I have a small apartment and a tight budget. What would you suggest?"
+     "Assuming I want to start with breakfast meals. What's a simple option?"
+     "So I'm dealing with a situation where [describe from YOUR perspective]."
+  
+  ✅ VAGUE CALLBACKS: Reference topics, never specific suggestions.
+     "Going back to the cooking topic from earlier..."
+     "About the morning routine stuff we discussed..."
+     "Earlier we talked about organization — related to that..."
+  
+  ✅ SELF-GENERATED CONTEXT: Introduce your own details.
+     "I tried making stir-fry last night and the veggies came out soggy."
+     "My dog has been scratching a lot lately, should I be worried?"
+     "I read somewhere that drinking water helps with focus — is that true?"
 
-4. NEVER reference specific numbers, names, lists, or details from the
-   assistant's prior response. Your message must be understandable even if
-   the assistant said something completely different.
+SELF-CHECK before outputting: Read your message and ask:
+  "If the assistant's previous response was COMPLETELY DELETED, would my 
+   message still make sense on its own?" 
+  If NO → REWRITE using topic pivot or state injection.
 
 CRITICAL REALISM BEHAVIORS (use these regularly, not every turn):
-- PUSH BACK: Sometimes disagree with advice. Say things like "I already tried 
-  that" or "That doesn't sound right" or "Are you sure? A colleague told me 
-  something different."
-- IGNORE ADVICE: Occasionally skip steps the assistant suggested and try 
-  something else instead. Report what you actually did, not what was asked.
-- MISUNDERSTAND: Sometimes misinterpret technical instructions. Confuse similar
-  terms (e.g., "restart" vs "reset", "WiFi" vs "ethernet"). Report wrong 
-  results because you did the wrong step.
-- PARTIAL COMPLIANCE: Try only 1 of 3 suggested steps and ask if you really 
-  need to do the others.
-- GET FRUSTRATED: Sometimes express annoyance at the situation, not at the 
-  assistant specifically. Use phrases like "this is ridiculous", "I don't have 
-  time for this", "why does this keep happening".
-- BRING BAGGAGE: Reference past bad experiences. "Last time I tried this, it broke."
+- PUSH BACK: Sometimes disagree with generic advice. Say things like "I already 
+  tried something like that before" or "That doesn't sound right" or "Are you 
+  sure? A colleague told me something different."
+- BRING YOUR OWN EXPERIENCE: Instead of referencing what the assistant said,
+  introduce your own attempts. "I tried doing X on my own and Y happened."
+- MISUNDERSTAND: Sometimes ask confused follow-ups about the TOPIC itself,
+  not about specific words the assistant used.
+- GET FRUSTRATED: Express annoyance at the SITUATION, not at specific advice.
+  "this is ridiculous", "I don't have time for this".
 - INTERRUPT FLOW: Occasionally change the subject mid-message to a tangential 
   concern before returning to the main issue.
+- PARTIAL COMPLIANCE: "I'm only going to try the simple version of that for now."
+  (Note: "that" refers to the general TOPIC, not a specific suggestion.)
 
 You must NEVER break character. You are a HUMAN USER prompting an AI."""
 
@@ -560,20 +574,22 @@ You must NEVER break character. You are a HUMAN USER prompting an AI."""
         if current_turn > 2:  # Don't add friction on the first few turns
             roll = random.random()
             if roll < 0.15:
-                friction_behaviors.append("PUSH BACK on the assistant's last suggestion — say you tried it and it didn't work, or that you're skeptical.")
+                friction_behaviors.append("EXPRESS SKEPTICISM about the general topic — say you tried something similar before and it didn't work.")
             elif roll < 0.25:
-                friction_behaviors.append("MISUNDERSTAND one of the assistant's technical instructions — report doing something slightly different than what was asked.")
+                friction_behaviors.append("ASK A CONFUSED FOLLOW-UP about the topic — show you don't fully understand the domain.")
             elif roll < 0.35:
                 friction_behaviors.append("EXPRESS FRUSTRATION about the situation (not at the assistant). Vent briefly before asking your actual question.")
             elif roll < 0.42:
-                friction_behaviors.append("IGNORE one of the assistant's suggestions and report trying your own approach instead.")
+                friction_behaviors.append("SHARE YOUR OWN APPROACH — say you tried doing it your own way and report what happened.")
 
         friction_text = ""
         if friction_behaviors:
             friction_text = "\nFRICTION INSTRUCTION: " + " ".join(friction_behaviors)
 
-        # Build context with rolling summary for long conversations
-        history_text = _build_context(conversation_history, window=10)
+        # Build context — STRIP assistant responses to prevent CAT-D violations!
+        # The user simulator should NOT see what the assistant said, because it
+        # will naturally echo/reference it. Show only user messages + placeholder.
+        catd_history = _build_catd_context(conversation_history, window=10)
 
         user_prompt = f"""\
 CHARACTER: {plan.user_persona}
@@ -583,11 +599,16 @@ CURRENT TOPIC: {current_topic}
 COMPLEXITY LEVEL: {current_complexity}
 TURN NUMBER: {current_turn + 1} of {plan.num_turns}
 {"PLOT TWIST — Introduce this complication: " + twist if twist else ""}
-{"CALLBACK — Reference something from earlier in the conversation." if is_callback else ""}
+{"CALLBACK — Reference a TOPIC (not specific advice) from earlier." if is_callback else ""}
 {friction_text}
 
-CONVERSATION SO FAR:
-{history_text if history_text else "(This is the first message — introduce yourself and your problem.)"}
+CONVERSATION SO FAR (assistant responses hidden to enforce CAT-D):
+{catd_history if catd_history else "(This is the first message — introduce yourself and your problem.)"}
+
+⚠️ CAT-D REMINDER: Your message must make sense even if the assistant said 
+something COMPLETELY DIFFERENT. Do NOT reference any specific advice, tips, 
+suggestions, or methods. Instead, pivot to a new sub-topic or introduce your 
+own situation/experience.
 
 Generate the next USER message. Be natural, authentic, and in character.
 Return ONLY the message text, nothing else."""
@@ -605,6 +626,35 @@ def _format_messages(messages: list[dict]) -> str:
     for msg in messages:
         role = "USER" if msg["role"] == "user" else "ASSISTANT"
         text += f"{role}: {msg['content']}\n\n"
+    return text
+
+
+def _build_catd_context(conversation_history: list[dict], window: int = 10) -> str:
+    """
+    Build CAT-D-safe context for UserSimulator.
+
+    CRITICAL: This function STRIPS assistant response content from the
+    conversation history. The user simulator only sees:
+      - Its own previous messages (full text)
+      - [ASSISTANT RESPONDED ON TOPIC: X] placeholders
+
+    This structurally prevents the model from echoing/referencing specific
+    assistant suggestions, which is the #1 cause of CAT-D violations.
+    """
+    # Take last `window` messages
+    history = conversation_history[-window * 2:] if len(conversation_history) > window * 2 else conversation_history
+
+    text = ""
+    for msg in history:
+        if msg["role"] == "user":
+            text += f"USER: {msg['content']}\n\n"
+        elif msg["role"] == "assistant":
+            # Only show that the assistant responded, NOT what it said
+            # Extract first line as a vague topic hint
+            content = msg.get("content", "")
+            first_line = content.split("\n")[0][:60] if content else ""
+            text += f"ASSISTANT: [responded to your question]\n\n"
+
     return text
 
 
