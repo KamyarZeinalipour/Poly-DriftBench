@@ -82,6 +82,12 @@ class PipelineStats:
             self.translations_low_fidelity_retries = 0
             self.back_translations = 0
 
+            # Translation quality checks
+            self.quality_checks_bilingual = 0
+            self.quality_checks_monolingual = 0
+            self.quality_low_bilingual = 0
+            self.quality_low_monolingual = 0
+
     def log_api_call(self, agent_name: str, prompt_tokens: int = 0,
                      completion_tokens: int = 0, total_tokens: int = 0):
         """Record one API call with token usage."""
@@ -136,6 +142,12 @@ class PipelineStats:
                     "low_fidelity_retries": self.translations_low_fidelity_retries,
                     "back_translations": self.back_translations,
                 },
+                "translation_quality": {
+                    "bilingual_checks": self.quality_checks_bilingual,
+                    "monolingual_checks": self.quality_checks_monolingual,
+                    "low_bilingual_scores": self.quality_low_bilingual,
+                    "low_monolingual_scores": self.quality_low_monolingual,
+                },
                 "phase_timings_seconds": dict(self.phase_timings),
             }
 
@@ -187,6 +199,8 @@ class TranslationResult:
     bleu_score: float = 0.0
     semantic_similarity: float = 0.0
     approved: bool = False
+    bilingual_quality: dict = field(default_factory=dict)
+    monolingual_quality: dict = field(default_factory=dict)
 
 
 # ──────────────────────────────────────────────────────────
@@ -289,6 +303,7 @@ class BaseAgent(ABC):
         system_prompt: str,
         user_prompt: str,
         temperature: float = None,
+        frequency_penalty: float = None,
         response_format: dict = None,
         max_retries: int = 3,
     ) -> str:
@@ -299,6 +314,7 @@ class BaseAgent(ABC):
             system_prompt: System message content.
             user_prompt: User message content.
             temperature: Override default temperature.
+            frequency_penalty: Penalize repeated tokens (0.0-2.0). Higher = more diverse.
             response_format: e.g., {"type": "json_object"} for JSON mode.
             max_retries: Number of retries on transient errors.
         """
@@ -310,6 +326,10 @@ class BaseAgent(ABC):
             ],
             "temperature": temperature if temperature is not None else self.temperature,
         }
+
+        # Frequency penalty — mathematically penalizes repeated tokens in logits
+        if frequency_penalty is not None:
+            kwargs["frequency_penalty"] = frequency_penalty
 
         # DeepSeek supports JSON mode via response_format
         if response_format:
@@ -1101,7 +1121,11 @@ Generate your response following ALL formatting rules. Be helpful, specific,
 and professional. VARY your structure from previous responses.
 Return ONLY the response text."""
 
-        return self._call_llm(self.SYSTEM_PROMPT, user_prompt, temperature=0.4)
+        return self._call_llm(
+            self.SYSTEM_PROMPT, user_prompt,
+            temperature=0.85,           # Higher temp for structural diversity
+            frequency_penalty=0.4,      # Penalize repeated tokens in logits
+        )
 
     @staticmethod
     def force_fix_ddm(content: str, turn_number: int = None) -> str:
