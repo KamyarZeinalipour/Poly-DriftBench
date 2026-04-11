@@ -978,33 +978,47 @@ These rules represent your professional communication standards. Follow them
 in EVERY response without exception. They should feel natural, not forced.
 
 CRITICAL — HIGH LEXICAL DIVERSITY (ANTI-REPETITION):
-🚫 You are STRICTLY FORBIDDEN from reusing introductory phrases. Specifically:
-  ❌ Do NOT use "The single most important action" more than ONCE in a conversation.
-  ❌ Do NOT use "Alternatively," to start bullet points repeatedly.
-  ❌ Do NOT start 2+ responses with the same opening sentence pattern.
-  ❌ Do NOT use the same transition phrase in consecutive responses.
+🚫 HARD BAN — the following phrases are COMPLETELY FORBIDDEN in ALL responses:
+  ❌ "The single most important action" — NEVER write this. EVER. Not even once.
+  ❌ "The key is to" — BANNED.
+  ❌ "The most important thing" — BANNED.
+  ❌ "Alternatively," at the start of any bullet — BANNED.
+  If you write ANY of these phrases, the response will be REJECTED AND DELETED.
 
-✅ You MUST drastically vary your sentence structures across responses:
-  - Sometimes start with a question: "Have you considered...?"
-  - Sometimes start with a story: "A common pattern I see is..."
-  - Sometimes start with validation: "That frustration makes total sense."
-  - Sometimes start with a direct command: "First thing tomorrow morning, do X."
-  - Sometimes start with a surprising fact: "Most people don't realize that..."
+✅ REPLACEMENT OPENERS (rotate through these, never reuse within 5 turns):
+  1. A question: "Have you tried...?" / "What if you...?"
+  2. Validation: "That frustration makes total sense."
+  3. A direct command: "First thing tomorrow morning, do X."
+  4. A surprising fact: "Most people don't realize that..."
+  5. A personal anecdote style: "I've seen this pattern before —"
+  6. An analogy: "Think of it like..."
+  7. A reframe: "Here's a different way to look at this:"
+  8. Agreement + build: "You're onto something — let me expand on that."
+  9. A challenge: "Let me push back slightly on that assumption."
+  10. Context-first: "Before jumping to solutions, let's understand why..."
   Keep an internal counter — if you've used a phrase once, NEVER use it again.
 
 CRITICAL — DOMAIN-ACCURATE CITATION GROUNDING:
 When generating the [Source: ...] tag, the cited institution MUST logically 
-match the SEMANTIC DOMAIN of your advice:
-  - Food/nutrition → USDA, FDA, Academy of Nutrition and Dietetics
+match the PRIMARY TOPIC of your advice in that specific response:
+  - Food/nutrition/cooking/grocery → USDA, FDA, Academy of Nutrition and Dietetics
   - Cleaning/home → EPA, American Cleaning Institute, Good Housekeeping Institute
-  - Finance/budget → Consumer Financial Protection Bureau, Federal Reserve
+  - Finance/budget/saving → Consumer Financial Protection Bureau, Federal Reserve
   - Sleep/health → WHO, NIH, Mayo Clinic, Sleep Foundation
   - Exercise/fitness → ACSM, CDC Physical Activity Guidelines
-  - Mental health → APA, NIMH, Mental Health Foundation
-  - Productivity → Harvard Business Review, Behavioral psychology research
-  - General → Peer-reviewed study, University research
+  - Mental health/stress → APA, NIMH, Mental Health Foundation
+  - Productivity/time → Harvard Business Review, Behavioral psychology research
+  - General/motivation → Peer-reviewed study, University research
+
+⚠️ MIXED-TOPIC RULE: When a response covers BOTH food AND budget (e.g., 
+"stretching groceries", "meal planning to save money"), cite the FOOD source 
+(USDA), NOT the financial source. The PRIMARY action determines the source:
+  ✅ Advice about cheap meals → [Source: USDA on affordable nutrition]
+  ❌ Advice about cheap meals → [Source: Consumer Financial Protection Bureau]
+  ✅ Advice about saving money → [Source: Consumer Financial Protection Bureau]
+
 🚫 Do NOT reuse the same [Source: ...] across unrelated topics.
-🚫 Do NOT cite a financial institution for cooking advice (or vice versa).
+🚫 Do NOT cite a financial institution for cooking/food/grocery advice.
 
 CRITICAL — VARY YOUR RESPONSE STRUCTURE:
 Do NOT use the same sentence patterns in every response. Mix these approaches:
@@ -1094,8 +1108,31 @@ Return ONLY the response text."""
         """
         Deterministic DDM compliance fix — last resort after LLM retries fail.
         Programmatically patches missing tags without requiring an API call.
+        Also sanitizes banned phrases that the LLM may have still produced.
         """
         import re
+        import random
+
+        # ─── Phrase Sanitization (Flaw 1 fix) ─────────────
+        # Deterministically replace banned intro phrases with varied alternatives
+        REPLACEMENTS = [
+            "A practical step here is to",
+            "What I'd recommend is to",
+            "The most effective approach is to",
+            "Here's what will make the biggest difference:",
+            "Your best move right now is to",
+            "A proven strategy is to",
+            "The smartest thing you can do is",
+            "Right off the bat, I'd say",
+        ]
+        BANNED = [
+            (r'[Tt]he single most important action(?:\s+is)?\s+(?:to\s+)?', lambda: random.choice(REPLACEMENTS) + ' '),
+            (r'[Tt]he key is to\s+', lambda: random.choice(REPLACEMENTS) + ' '),
+            (r'[Tt]he most important thing(?:\s+is)?\s+(?:to\s+)?', lambda: random.choice(REPLACEMENTS) + ' '),
+        ]
+        for pattern, replacement_fn in BANNED:
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement_fn(), content, count=1)
 
         # L5: Ensure [Turn: N] at the beginning
         if turn_number is not None and not re.match(r'^\s*\[Turn:\s*\d+\]', content):

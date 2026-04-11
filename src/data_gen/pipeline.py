@@ -383,7 +383,21 @@ class DataFactory:
         Final deterministic DDM safety net.
         Runs after ALL generation/rewrite phases to catch any remaining DDM
         violations (e.g., introduced by auditor rewrites) and force-fix them.
+        Also runs phrase sanitization on ALL assistant messages.
         """
+        # Step 1: Run force_fix_ddm on ALL assistant messages for:
+        #   - Banned phrase sanitization (Flaw 1)
+        #   - L5 turn counter correction
+        #   - L1/L3/L4 fixes
+        asst_idx = 0
+        for i, msg in enumerate(conversation):
+            if msg["role"] == "assistant":
+                asst_idx += 1
+                conversation[i]["content"] = AssistantSimulator.force_fix_ddm(
+                    msg["content"], turn_number=asst_idx
+                )
+
+        # Step 2: Validate and report any remaining issues
         rule_result = self._rule_based_validate(conversation)
         ddm_errors = [
             i for i in rule_result["issues"]
@@ -391,21 +405,9 @@ class DataFactory:
         ]
         if ddm_errors:
             console.print(
-                f"  🔩 [red]Safety net[/red]: force-fixing {len(ddm_errors)} "
-                f"DDM violations in final output..."
+                f"  🔩 [red]Safety net[/red]: {len(ddm_errors)} DDM violations "
+                f"remain after force-fix (likely structural L2 issues)"
             )
-            failed_turns = set(i["turn"] for i in ddm_errors)
-            for turn_idx in failed_turns:
-                msg_idx = turn_idx * 2 + 1
-                if msg_idx < len(conversation) and conversation[msg_idx]["role"] == "assistant":
-                    conversation[msg_idx]["content"] = (
-                        AssistantSimulator.force_fix_ddm(
-                            conversation[msg_idx]["content"],
-                            turn_number=turn_idx + 1,  # 1-indexed for [Turn: N]
-                        )
-                    )
-            # Re-validate after force-fix
-            rule_result = self._rule_based_validate(conversation)
 
         return conversation, rule_result
 
