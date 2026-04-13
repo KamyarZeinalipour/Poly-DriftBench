@@ -1061,10 +1061,7 @@ Do NOT use the same sentence patterns in every response. Mix these approaches:
 Your responses should be 2-8 sentences long, professional but warm, and 
 genuinely helpful. Match response length to the complexity of the question."""
 
-    # Class-level style rotation queue (shared across all turns in a conversation)
-    _style_queue = []
-    _previous_styles = []
-
+    # Response style rotation — instance-level to avoid cross-instance interference
     RESPONSE_STYLES = [
         "Start with a brief empathetic acknowledgment, then give 3 numbered action steps.",
         "Give 2 focused suggestions, then ask one clarifying question as point 3.",
@@ -1077,6 +1074,12 @@ genuinely helpful. Match response length to the complexity of the question."""
         "Compare two approaches (pros and cons for each), then recommend one.",
         "Start with 'Here's what most people get wrong about this...' then give 2-3 corrected approaches.",
     ]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Instance-level style rotation (not class-level!)
+        self._style_queue = []
+        self._previous_styles = []
 
     def generate_response(
         self,

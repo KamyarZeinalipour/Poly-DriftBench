@@ -131,7 +131,7 @@ class DataFactory:
 
         # Phase 2a: Batch-generate ALL user messages (few API calls)
         console.print(f"    📦 [cyan]Batch-generating[/cyan] {plan.num_turns} user messages...")
-        user_messages = self.user_sim.generate_all_messages(plan, batch_size=15)
+        user_messages = self.user_sim.generate_all_messages(plan)
         console.print(f"    📦 Got {len(user_messages)} user messages ✅")
 
         # Phase 2b: Generate assistant responses sequentially (needs context)
