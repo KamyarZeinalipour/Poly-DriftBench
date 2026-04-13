@@ -1531,6 +1531,246 @@ Text:
 
 
 # ──────────────────────────────────────────────────────────
+# Agent 8: Bilingual Quality Reviewer
+# ──────────────────────────────────────────────────────────
+
+class BilingualQualityAgent(BaseAgent):
+    """
+    Step 5 of the translation pipeline: Reviews translation quality by
+    comparing the original English text alongside the translation.
+
+    Evaluates: accuracy, format preservation, meaning fidelity, register match.
+    This agent does NOT modify the translation — it only scores it.
+    """
+
+    SYSTEM_PROMPT = """\
+You are a senior bilingual translation quality auditor. You receive an
+original English text and its translation into a target language, displayed
+SIDE BY SIDE. Your task is to evaluate the translation quality on several
+dimensions.
+
+You are EXTREMELY thorough. A perfect score of 10/10 is rare.
+
+EVALUATION DIMENSIONS:
+1. ACCURACY (0-10): Does the translation preserve the exact semantic meaning?
+   - 10: Perfect meaning transfer, no omissions or additions
+   - 7: Minor nuance differences that don't affect comprehension
+   - 4: Noticeable meaning shifts or significant omissions
+   - 1: Meaning is distorted or contradictory
+
+2. FORMAT_PRESERVATION (0-10): Are all structural markers intact?
+   - [SYS_ACK: ACTIVE] must appear EXACTLY as-is (English)
+   - [Source: ...] citations must remain in English
+   - [Turn: N] markers must be preserved
+   - Numbered bullet points (1. 2. 3.) must be preserved
+   - 10: All markers perfectly preserved
+   - 0: Critical markers missing or translated
+
+3. MEANING_FIDELITY (0-10): Is the intent and nuance preserved?
+   - Are idioms adapted appropriately (not literally translated)?
+   - Are technical terms correct in the target language?
+   - Does the advice carry the same practical value?
+   - 10: A native speaker would receive identical information
+   - 5: Some nuance lost but core message intact
+   - 1: Critical information lost or distorted
+
+4. REGISTER_MATCH (0-10): Does the translation match the tone of the original?
+   - Formal/informal register preserved?
+   - Emotional tone consistent?
+   - Professional warmth maintained?
+   - 10: Tone is indistinguishable from original
+   - 5: Slightly more formal/informal than original
+   - 1: Completely wrong register
+
+OUTPUT: Return ONLY valid JSON:
+{
+    "accuracy": <0-10>,
+    "format_preservation": <0-10>,
+    "meaning_fidelity": <0-10>,
+    "register_match": <0-10>,
+    "overall": <0-10 weighted average>,
+    "issues": ["specific issue 1", "specific issue 2", ...],
+    "critical_errors": ["only list errors that fundamentally break the translation"]
+}"""
+
+    LANG_NAMES = {
+        "en": "English", "it": "Italian", "es": "Spanish",
+        "fr": "French", "de": "German",
+    }
+
+    def evaluate(
+        self,
+        original: str,
+        translation: str,
+        source_lang: str,
+        target_lang: str,
+    ) -> dict:
+        """
+        Evaluate translation quality by comparing original and translation
+        side by side.
+
+        Returns:
+            Dict with scores (0-10) for accuracy, format_preservation,
+            meaning_fidelity, register_match, overall, plus issues list.
+        """
+        source_name = self.LANG_NAMES.get(source_lang, source_lang)
+        target_name = self.LANG_NAMES.get(target_lang, target_lang)
+
+        prompt = f"""\
+Evaluate the following translation from {source_name} to {target_name}.
+
+═══════════════════════════════════════════
+ORIGINAL ({source_name}):
+═══════════════════════════════════════════
+{original}
+
+═══════════════════════════════════════════
+TRANSLATION ({target_name}):
+═══════════════════════════════════════════
+{translation}
+
+Score the translation on all 4 dimensions.
+Return ONLY the JSON object, nothing else."""
+
+        result = self._call_llm_json(self.SYSTEM_PROMPT, prompt, temperature=0.2)
+
+        # Ensure all fields exist with defaults
+        return {
+            "accuracy": result.get("accuracy", 0),
+            "format_preservation": result.get("format_preservation", 0),
+            "meaning_fidelity": result.get("meaning_fidelity", 0),
+            "register_match": result.get("register_match", 0),
+            "overall": result.get("overall", 0),
+            "issues": result.get("issues", []),
+            "critical_errors": result.get("critical_errors", []),
+        }
+
+
+# ──────────────────────────────────────────────────────────
+# Agent 9: Monolingual Quality Reviewer
+# ──────────────────────────────────────────────────────────
+
+class MonolingualQualityAgent(BaseAgent):
+    """
+    Step 6 of the translation pipeline: Reviews translation quality by
+    reading ONLY the translated text — without seeing the original.
+
+    Evaluates: fluency, coherence, naturalness, readability.
+    This simulates a native speaker's first impression of the text.
+    This agent does NOT modify the translation — it only scores it.
+    """
+
+    SYSTEM_PROMPT = """\
+You are a native-speaker language quality reviewer. You will read a text
+in a target language and evaluate it AS IF you have never seen the original.
+You do NOT have access to the source text.
+
+Your job is to determine whether this text reads naturally — as if it were
+originally written in this language by a fluent native speaker — or whether
+it feels like a translation ("translationese").
+
+EVALUATION DIMENSIONS:
+1. FLUENCY (0-10): Does the text flow naturally?
+   - 10: Reads like native writing, smooth and effortless
+   - 7: Minor awkwardness but fully comprehensible
+   - 4: Noticeably stilted or unnatural phrasing
+   - 1: Barely readable, clearly machine-translated
+
+2. COHERENCE (0-10): Is the text internally consistent and logical?
+   - Does the argument or advice follow a clear structure?
+   - Are transitions between ideas smooth?
+   - Are numbered points logically ordered?
+   - 10: Crystal-clear structure and flow
+   - 5: Understandable but somewhat disjointed
+   - 1: Confusing or contradictory
+
+3. NATURALNESS (0-10): Does it sound like a real person wrote it?
+   - Are idioms and expressions native to this language?
+   - Does word order feel natural (not calqued from English)?
+   - Are collocations correct (words that naturally go together)?
+   - 10: Indistinguishable from native writing
+   - 5: Some phrases feel "off" but meaning is clear
+   - 1: Obviously translated word-for-word
+
+4. READABILITY (0-10): How easy is the text to understand?
+   - Is vocabulary appropriate for a general audience?
+   - Is sentence length varied and manageable?
+   - Are technical terms explained when needed?
+   - 10: Effortless to read
+   - 5: Requires some re-reading
+   - 1: Very difficult to parse
+
+TRANSLATIONESE MARKERS TO WATCH FOR:
+- Passive voice overuse (common in EN→Romance translations)
+- Calqued phrasal verbs ("prendere su" instead of "raccogliere")
+- Unnatural word order following English SVO rigidly
+- False friends or cognate errors
+- Overly literal idiom translations
+- Excessive use of personal pronouns (unnecessary in pro-drop languages)
+
+OUTPUT: Return ONLY valid JSON:
+{
+    "fluency": <0-10>,
+    "coherence": <0-10>,
+    "naturalness": <0-10>,
+    "readability": <0-10>,
+    "overall": <0-10 weighted average>,
+    "translationese_markers": ["specific marker 1", "specific marker 2", ...],
+    "awkward_phrases": ["phrase that sounds unnatural", ...],
+    "positive_notes": ["what works well in this translation"]
+}"""
+
+    LANG_NAMES = {
+        "en": "English", "it": "Italian", "es": "Spanish",
+        "fr": "French", "de": "German",
+    }
+
+    def evaluate(
+        self,
+        translation: str,
+        target_lang: str,
+    ) -> dict:
+        """
+        Evaluate translation quality by reading only the translated text.
+        No access to the original — simulates a native reader's perspective.
+
+        Returns:
+            Dict with scores (0-10) for fluency, coherence, naturalness,
+            readability, overall, plus translationese markers and notes.
+        """
+        target_name = self.LANG_NAMES.get(target_lang, target_lang)
+
+        prompt = f"""\
+You are reading the following {target_name} text for the first time.
+You have NEVER seen the original. Evaluate it purely as a {target_name} reader.
+
+Do NOT try to guess the original language or reconstruct it.
+Focus ONLY on how this text reads in {target_name}.
+
+═══════════════════════════════════════════
+TEXT ({target_name}):
+═══════════════════════════════════════════
+{translation}
+
+Score the text on all 4 dimensions.
+Return ONLY the JSON object, nothing else."""
+
+        result = self._call_llm_json(self.SYSTEM_PROMPT, prompt, temperature=0.2)
+
+        # Ensure all fields exist with defaults
+        return {
+            "fluency": result.get("fluency", 0),
+            "coherence": result.get("coherence", 0),
+            "naturalness": result.get("naturalness", 0),
+            "readability": result.get("readability", 0),
+            "overall": result.get("overall", 0),
+            "translationese_markers": result.get("translationese_markers", []),
+            "awkward_phrases": result.get("awkward_phrases", []),
+            "positive_notes": result.get("positive_notes", []),
+        }
+
+
+# ──────────────────────────────────────────────────────────
 # Translation Pipeline Orchestrator
 # ──────────────────────────────────────────────────────────
 
@@ -1538,18 +1778,27 @@ class TranslationPipeline:
     """
     Multi-agent translation pipeline:
 
-        1. TranslatorAgent     → Initial translation (EN → target)
-        2. Rule-Based Validator → Check format markers programmatically
-        3. TranslationReviewer → Fix issues + improve naturalness
-        4. BackTranslator      → Verify semantic fidelity (target → EN)
+        1. TranslatorAgent          → Initial translation (EN → target)
+        2. Rule-Based Validator     → Check format markers programmatically
+        3. TranslationReviewer      → Fix issues + improve naturalness
+        4. BackTranslator           → Verify semantic fidelity (target → EN)
+        5. BilingualQualityAgent    → Score: original + translation side-by-side
+        6. MonolingualQualityAgent  → Score: translation only (native reader)
 
-    If semantic fidelity is too low, loop back to step 3.
+    Steps 5-6 are evaluation-only (no modifications). They run on assistant
+    messages only, in parallel with each other.
+    If semantic fidelity is too low (Step 4), loop back to step 1.
     """
+
+    BILINGUAL_SCORE_THRESHOLD = 6.0   # Flag messages scoring below this
+    MONOLINGUAL_SCORE_THRESHOLD = 6.0
 
     def __init__(self, model: str = "deepseek-chat", max_revision_rounds: int = 2):
         self.translator = TranslatorAgent(model=model, temperature=0.3)
         self.reviewer = TranslationReviewerAgent(model=model, temperature=0.2)
         self.back_translator = BackTranslatorAgent(model=model, temperature=0.2)
+        self.bilingual_qa = BilingualQualityAgent(model=model, temperature=0.2)
+        self.monolingual_qa = MonolingualQualityAgent(model=model, temperature=0.2)
         self.max_revisions = max_revision_rounds
 
         # Import the rule-based validator
@@ -1569,12 +1818,16 @@ class TranslationPipeline:
         target_lang: str,
     ) -> TranslationResult:
         """
-        Translate a single message through the full 3-agent pipeline.
+        Translate a single message through the full multi-agent pipeline.
+
+        Steps 1-4: Translation + verification (existing)
+        Steps 5-6: Quality evaluation (new — assistant messages only)
 
         Returns:
-            TranslationResult with translated text and verification data.
+            TranslationResult with translated text, verification, and quality data.
         """
         import re
+        from concurrent.futures import ThreadPoolExecutor
 
         # ─── Step 1: Initial translation ─────────────────
         pipeline_stats.translations_total += 1
@@ -1636,6 +1889,25 @@ class TranslationPipeline:
             back_translated = self.back_translator.back_translate(translated, target_lang)
             fidelity = self.back_translator.check_semantic_fidelity(text, back_translated)
 
+        # ─── Steps 5 & 6: Quality evaluation (assistant only) ──
+        bilingual_quality = {}
+        monolingual_quality = {}
+
+        if role == "assistant":
+            # Run both QA agents in parallel — they're independent
+            with ThreadPoolExecutor(max_workers=2) as qa_executor:
+                bilingual_future = qa_executor.submit(
+                    self._run_bilingual_qa,
+                    text, translated, source_lang, target_lang,
+                )
+                monolingual_future = qa_executor.submit(
+                    self._run_monolingual_qa,
+                    translated, target_lang,
+                )
+
+                bilingual_quality = bilingual_future.result()
+                monolingual_quality = monolingual_future.result()
+
         return TranslationResult(
             source_lang=source_lang,
             target_lang=target_lang,
@@ -1643,7 +1915,57 @@ class TranslationPipeline:
             translated_text=translated,
             back_translation=back_translated,
             approved=fidelity["score"] >= 0.3,
+            bilingual_quality=bilingual_quality,
+            monolingual_quality=monolingual_quality,
         )
+
+    def _run_bilingual_qa(
+        self,
+        original: str,
+        translated: str,
+        source_lang: str,
+        target_lang: str,
+    ) -> dict:
+        """Run bilingual quality check with stats tracking."""
+        pipeline_stats.quality_checks_bilingual += 1
+        try:
+            result = self.bilingual_qa.evaluate(
+                original=original,
+                translation=translated,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
+            if result.get("overall", 10) < self.BILINGUAL_SCORE_THRESHOLD:
+                pipeline_stats.quality_low_bilingual += 1
+                logger.warning(
+                    f"  ⚠️ Bilingual QA low score: {result.get('overall', 0)}/10"
+                )
+            return result
+        except Exception as e:
+            logger.error(f"  ❌ Bilingual QA failed: {e}")
+            return {"error": str(e)}
+
+    def _run_monolingual_qa(
+        self,
+        translated: str,
+        target_lang: str,
+    ) -> dict:
+        """Run monolingual quality check with stats tracking."""
+        pipeline_stats.quality_checks_monolingual += 1
+        try:
+            result = self.monolingual_qa.evaluate(
+                translation=translated,
+                target_lang=target_lang,
+            )
+            if result.get("overall", 10) < self.MONOLINGUAL_SCORE_THRESHOLD:
+                pipeline_stats.quality_low_monolingual += 1
+                logger.warning(
+                    f"  ⚠️ Monolingual QA low score: {result.get('overall', 0)}/10"
+                )
+            return result
+        except Exception as e:
+            logger.error(f"  ❌ Monolingual QA failed: {e}")
+            return {"error": str(e)}
 
     def _check_format_rules(self, original: str, translated: str) -> list[dict]:
         """Quick rule-based format check on a single message."""
@@ -1664,8 +1986,8 @@ class TranslationPipeline:
             })
 
         # Check numbered bullets
-        src_bullets = re.findall(r'^\s*\d+[\.\)]\s', original, re.MULTILINE)
-        tgt_bullets = re.findall(r'^\s*\d+[\.\)]\s', translated, re.MULTILINE)
+        src_bullets = re.findall(r'^\s*\d+[\.)\]\s', original, re.MULTILINE)
+        tgt_bullets = re.findall(r'^\s*\d+[\.)\]\s', translated, re.MULTILINE)
         if len(src_bullets) > 0 and len(tgt_bullets) == 0:
             issues.append({
                 "rule": "FMT_BULLETS",
@@ -1710,7 +2032,7 @@ class TranslationPipeline:
         source_lang: str,
         target_lang: str,
         max_workers: int = 10,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], dict]:
         """
         Translate an entire conversation through the multi-agent pipeline.
         Uses ThreadPoolExecutor for parallel translation of messages.
@@ -1720,10 +2042,17 @@ class TranslationPipeline:
             source_lang: Source language code.
             target_lang: Target language code.
             max_workers: Max parallel API calls (default 10).
+
+        Returns:
+            Tuple of (translated_messages, quality_summary) where
+            quality_summary contains aggregate bilingual/monolingual scores.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def _translate_one(idx_msg: tuple[int, dict]) -> tuple[int, dict]:
+        bilingual_scores = []
+        monolingual_scores = []
+
+        def _translate_one(idx_msg: tuple[int, dict]) -> tuple[int, dict, dict, dict]:
             idx, msg = idx_msg
             result = self.translate_message(
                 text=msg["content"],
@@ -1735,7 +2064,7 @@ class TranslationPipeline:
                 "role": msg["role"],
                 "content": result.translated_text,
                 "back_translation": result.back_translation,
-            }
+            }, result.bilingual_quality, result.monolingual_quality
 
         # Translate messages in parallel
         results = [None] * len(conversation)
@@ -1745,7 +2074,36 @@ class TranslationPipeline:
                 for i, msg in enumerate(conversation)
             }
             for future in as_completed(futures):
-                idx, translated_msg = future.result()
+                idx, translated_msg, bi_q, mono_q = future.result()
                 results[idx] = translated_msg
 
-        return results
+                # Collect quality scores (non-empty = assistant messages)
+                if bi_q:
+                    bilingual_scores.append(bi_q.get("overall", 0))
+                if mono_q:
+                    monolingual_scores.append(mono_q.get("overall", 0))
+
+        # Compute aggregate quality summary
+        quality_summary = {}
+        if bilingual_scores:
+            quality_summary["bilingual"] = {
+                "mean_score": round(sum(bilingual_scores) / len(bilingual_scores), 2),
+                "min_score": round(min(bilingual_scores), 2),
+                "max_score": round(max(bilingual_scores), 2),
+                "messages_evaluated": len(bilingual_scores),
+                "below_threshold": sum(
+                    1 for s in bilingual_scores if s < self.BILINGUAL_SCORE_THRESHOLD
+                ),
+            }
+        if monolingual_scores:
+            quality_summary["monolingual"] = {
+                "mean_score": round(sum(monolingual_scores) / len(monolingual_scores), 2),
+                "min_score": round(min(monolingual_scores), 2),
+                "max_score": round(max(monolingual_scores), 2),
+                "messages_evaluated": len(monolingual_scores),
+                "below_threshold": sum(
+                    1 for s in monolingual_scores if s < self.MONOLINGUAL_SCORE_THRESHOLD
+                ),
+            }
+
+        return results, quality_summary

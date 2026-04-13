@@ -9,7 +9,8 @@
   <img src="https://img.shields.io/badge/Models-13-orange" alt="Models">
   <img src="https://img.shields.io/badge/Experiments-18-red" alt="Experiments">
   <img src="https://img.shields.io/badge/Conversations-4%2C500-green" alt="Conversations">
-  <img src="https://img.shields.io/badge/Pipeline-v7--catd--l5--dual--track-purple" alt="Pipeline">
+  <img src="https://img.shields.io/badge/Pipeline-v8--quality--hardened-purple" alt="Pipeline">
+  <img src="https://img.shields.io/badge/Validators-16%20checks-brightgreen" alt="Validators">
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License">
 </p>
 
@@ -333,16 +334,69 @@ python scripts/run_full_experiment.py --skip-gpu
 # Full production (100 conversations, 3-tier, 5 languages)
 python scripts/run_production.py --parallel 3 --output data/production
 
+# Regenerate English-only (fast, no translation)
+python scripts/regenerate_en.py --output data/full_test --short 5 --medium 5 --long 5
+
 # Quick test
 python -m src.cli produce --num 2 --output data/test
 ```
 
-### 4. Human Annotation
+---
 
-```bash
-cd annotation_ui && bash start.sh
-# Accessible via Cloudflare tunnel
+## 🛡️ Quality-Hardened Generation Pipeline (v8)
+
+The data generation pipeline was iteratively hardened through 3 rounds of quality auditing to eliminate 5 critical flaws found in the initial generations.
+
+### The 5 Flaws (and How They Were Solved)
+
+| # | Flaw | Root Cause | Fix | Result |
+|---|------|-----------|-----|--------|
+| 1 | **Lexical Overfitting** | LLM compresses to a single intro phrase | `frequency_penalty=0.4` + `temperature=0.85` at API level | 17x → 0x |
+| 2 | **Citation Hallucination** | Cross-domain citations (financial source for cooking) | Mixed-topic citation rules + domain-aware `force_fix_ddm` | 5 → 0 mismatches |
+| 3 | **Groundhog Day Loop** | User repeats same complaint verbatim | Resolved-problem tracker in batch prompt | Eliminated |
+| 4 | **Meta-Language** | Robotic pivots ("Switching topics", "Plot twist") | Hard ban in prompts + `QUAL_META_LANGUAGE` validator | 13 → 0 |
+| 5 | **Length Uniformity** | All user messages same length | Length variance mandate (20% ultra-short / 20% long / 60% normal) | CV: 0.14 → 0.33 |
+
+### 16 Rule-Based Validators
+
+| Category | Check | Type | What It Catches |
+|----------|-------|------|----------------|
+| **DDM** | `DDM_L1` – `DDM_L5` | Error | Missing tags, bullets, forbidden words, citations, turn counter |
+| **Structural** | `STRUCT_ROLE`, `STRUCT_EMPTY`, `STRUCT_LENGTH` | Error/Warning | Role alternation, empty messages, length bounds |
+| **Quality** | `QUAL_REPETITION` | Warning | Near-duplicate responses (trigram Jaccard) |
+| | `QUAL_DIVERSITY` | Warning | Low lexical diversity (TTR) |
+| | `QUAL_ASSISTANT_VARIETY` | Warning | Assistant reusing same opener |
+| | `QUAL_USER_LENGTH_VARIANCE` | Warning | User messages too uniform (CV) |
+| | `QUAL_META_LANGUAGE` | Warning | Robotic pivot phrases |
+| | `QUAL_INTRO_REPETITION` | Warning | Same intro sentence reused 3+ times |
+| | `QUAL_PHRASE_SPAM` | Warning | Specific banned phrases in openings |
+| | `QUAL_CITATION_DOMAIN` | Warning | Citation-topic domain mismatch |
+| | `QUAL_USER_VERBATIM` | Warning | User repeating complaints verbatim |
+| **Coherence** | `COHER_PHANTOM_REF` | Warning | User references non-existent advice |
+| | `QUAL_TOPIC_REPEAT` | Warning | Assistant repeating advice 10+ turns apart |
+| **CAT-D** | `CATD_ECHO` | Warning | User echoing assistant-specific terminology |
+
+### API-Level Diversity Controls
+
+```python
+# AssistantSimulator generates with:
+temperature = 0.85          # Higher than default for structural diversity
+frequency_penalty = 0.4     # Penalizes token reuse at the logit level
+
+# 10 response styles in a shuffled rotation queue (no repeats until all used)
+# Anti-repetition context: previous 2 styles injected as "AVOID" patterns
+# Domain-aware force_fix_ddm: food→USDA, finance→CFPB, sleep→NIH, etc.
 ```
+
+### Architecture Improvements
+
+| Feature | Before | After |
+|---------|--------|-------|
+| **Batch sizing** | Fixed 15 | Dynamic: short=all-at-once, medium=20, long=15 |
+| **Style rotation** | 5 styles, `random.choice()` | 10 styles, shuffled deque + anti-repeat |
+| **Force-fix sources** | Generic "Standard professional guidelines" | Domain-aware (USDA/EPA/CFPB/NIH/APA) |
+| **Safety net** | Only fix DDM errors | Fix ALL messages (L5 + phrase sanitization) |
+| **Problem tracker** | None | Resolved-problems injected into next batch |
 
 ---
 
@@ -360,8 +414,9 @@ Poly-DriftBench/
 │   ├── cli.py                          # CLI entry point
 │   ├── data_gen/
 │   │   ├── agents.py                   # 9 agents + CAT-D user sim + DDM force-fix
-│   │   ├── pipeline.py                 # DataFactory orchestrator
-│   │   ├── validators.py              # Rule-based DDM + translation validators
+│   │   │                                #   freq_penalty=0.4, temp=0.85, style rotation
+│   │   ├── pipeline.py                 # DataFactory orchestrator + safety net
+│   │   ├── validators.py              # 16 rule-based validators (DDM + quality + CAT-D)
 │   │   └── seed_generator.py          # 10 domain templates (5E/3M/2H)
 │   ├── evaluation/
 │   │   └── ddm.py                      # DDM v2 scoring (L1–L5, AUC, τ½, sDOP, CI95)

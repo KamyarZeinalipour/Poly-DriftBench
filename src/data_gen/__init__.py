@@ -7,6 +7,8 @@ from .agents import (
     TranslatorAgent,
     TranslationReviewerAgent,
     BackTranslatorAgent,
+    BilingualQualityAgent,
+    MonolingualQualityAgent,
     TranslationPipeline,
     PipelineStats,
     pipeline_stats,

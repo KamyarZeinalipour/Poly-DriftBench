@@ -417,22 +417,22 @@ class DataFactory:
         self,
         conversation: list[dict],
         target_lang: str,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], dict]:
         """Phase 4: Translate conversation using the multi-agent pipeline."""
         console.print(
             f"  🌍 [magenta]Translation Pipeline[/magenta] → {target_lang.upper()} "
-            f"(translate → review → back-verify)...",
+            f"(translate → review → back-verify → quality check)...",
             end=" ",
         )
 
-        translated = self.translation_pipeline.translate_conversation(
+        translated, quality_summary = self.translation_pipeline.translate_conversation(
             conversation=conversation,
             source_lang="en",
             target_lang=target_lang,
         )
 
         console.print(f"✅ ({len(translated)} messages)")
-        return translated
+        return translated, quality_summary
 
     # ─── Full Pipeline ───────────────────────────────────
 
@@ -490,8 +490,8 @@ class DataFactory:
             )
 
             def _translate_and_validate(lang: str) -> tuple[str, list[dict], dict]:
-                """Translate one language and validate — runs in a thread."""
-                translated = self.translation_pipeline.translate_conversation(
+                """Translate one language, run QA agents, and validate — runs in a thread."""
+                translated, quality_summary = self.translation_pipeline.translate_conversation(
                     conversation=conversation,
                     source_lang="en",
                     target_lang=lang,
@@ -506,6 +506,7 @@ class DataFactory:
                     "passed": trans_report.passed,
                     "errors": trans_report.error_count,
                     "metrics": trans_report.metrics,
+                    "quality": quality_summary,
                     "issues": [
                         {"turn": i.turn, "rule": i.rule, "severity": i.severity, "msg": i.message}
                         for i in trans_report.issues[:20]
@@ -528,12 +529,16 @@ class DataFactory:
                     # Print per-language results as they complete
                     status = "✅" if val_result["passed"] else "❌"
                     metrics = val_result["metrics"]
+                    quality = val_result.get("quality", {})
+                    bi_score = quality.get("bilingual", {}).get("mean_score", "—")
+                    mono_score = quality.get("monolingual", {}).get("mean_score", "—")
                     console.print(
                         f"    {status} {lang.upper()} done | "
                         f"{val_result['errors']} errors | "
                         f"SYS_ACK={metrics.get('sysack_preservation_rate', 0):.0%} "
                         f"Sources={metrics.get('source_citation_preservation_rate', 0):.0%} "
-                        f"Bullets={metrics.get('bullet_preservation_rate', 0):.0%}"
+                        f"Bullets={metrics.get('bullet_preservation_rate', 0):.0%} | "
+                        f"Bilingual={bi_score}/10 Monolingual={mono_score}/10"
                     )
 
             pipeline_stats.end_phase("translation")
