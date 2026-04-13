@@ -399,7 +399,7 @@ class DataFactory:
         Because frequency_penalty only applies to a sliding window of ~4K-8K
         tokens, the LLM can still spam phrases in 120+ turn conversations.
         This deterministically strips known filler phrases from assistant
-        responses, guaranteeing lexical purity.
+        responses, then polishes any orphaned grammar left behind.
         """
         import re
 
@@ -432,6 +432,34 @@ class DataFactory:
                             pattern, '', content, count=1, flags=re.IGNORECASE
                         )
                         msg["content"] = content.strip()
+
+        # ─── Grammar Polish (fixes "Regex Chainsaw" damage) ─────
+        # After stripping filler phrases, the sentence start may have:
+        #   - Orphaned punctuation: ", and your idea..." or "—lying awake..."
+        #   - Dangling conjunctions: "is that chronic sleep..." 
+        #   - Lowercase first letter: "they believe a small step..."
+        for msg in asst_msgs:
+            content = msg["content"]
+            match = re.match(r'^(\[Turn:\s*\d+\])\s*(.*)$', content, flags=re.DOTALL)
+            if not match:
+                continue
+
+            turn_tag, core_text = match.groups()
+
+            # Strip orphaned punctuation (commas, dashes, colons) at start
+            core_text = re.sub(r'^[\s,\-—–:]+', '', core_text)
+            # Strip dangling conjunctions/fragments left by naive replace
+            core_text = re.sub(r'^(and|is that|is|that|but|so|or)\s+', '', core_text, flags=re.IGNORECASE)
+            # Clean up again after conjunction removal
+            core_text = re.sub(r'^[\s,\-—–:]+', '', core_text)
+            # Capitalize the first alphabetical character
+            core_text = re.sub(
+                r'^([^\w]*)([a-z])',
+                lambda m: m.group(1) + m.group(2).upper(),
+                core_text
+            )
+
+            msg["content"] = f"{turn_tag} {core_text}"
 
         # Log how many were stripped
         stripped = sum(max(0, v - 2) for v in phrase_counts.values())

@@ -68,8 +68,8 @@ TIERS = {
     "long": {
         "description": "Deep drift — long context stress test",
         "num_conversations": 25,
-        "min_turns": 80,
-        "max_turns": 120,
+        "min_turns": 100,
+        "max_turns": 100,
     },
 }
 
