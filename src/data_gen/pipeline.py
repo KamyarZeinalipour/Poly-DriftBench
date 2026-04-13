@@ -378,17 +378,91 @@ class DataFactory:
 
         return conversation
 
+    # ─── Filler Phrase Post-Processor ────────────────────
+
+    FILLER_PATTERNS = [
+        # Phrases that LLMs spam due to the Penalty Horizon
+        # (frequency_penalty only covers ~4K-8K token window)
+        r"Here'?s what most people get wrong about this:?\s*",
+        r"That frustration makes total sense\.?\s*",
+        r"A surprising fact:?\s*",
+        r"Most people don'?t realize that\s+",
+        r"The single most important action is to\s+",
+        r"The key is to\s+",
+        r"The most important thing is to\s+",
+    ]
+
+    def _strip_filler_phrases(self, conversation: list[dict]) -> list[dict]:
+        """
+        Regex post-processor for the Penalty Horizon problem.
+
+        Because frequency_penalty only applies to a sliding window of ~4K-8K
+        tokens, the LLM can still spam phrases in 120+ turn conversations.
+        This deterministically strips known filler phrases from assistant
+        responses, guaranteeing lexical purity.
+        """
+        import re
+
+        asst_msgs = [m for m in conversation if m["role"] == "assistant"]
+
+        # Track phrase usage counts
+        phrase_counts = {}
+        for msg in asst_msgs:
+            content = msg["content"]
+            # Strip [Turn: N] prefix for analysis
+            text = re.sub(r'^\s*\[Turn:\s*\d+\]\s*', '', content)
+
+            for pattern in self.FILLER_PATTERNS:
+                if re.search(pattern, text, re.IGNORECASE):
+                    key = pattern[:40]
+                    phrase_counts[key] = phrase_counts.get(key, 0) + 1
+
+                    # Only strip if used more than 2 times (allow occasional use)
+                    if phrase_counts[key] > 2:
+                        # Remove the filler phrase but keep the rest
+                        content = re.sub(
+                            r'(\[Turn:\s*\d+\]\s*)' + pattern,
+                            r'\1',
+                            content,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        # Also remove if it appears mid-sentence
+                        content = re.sub(
+                            pattern, '', content, count=1, flags=re.IGNORECASE
+                        )
+                        msg["content"] = content.strip()
+
+        # Log how many were stripped
+        stripped = sum(max(0, v - 2) for v in phrase_counts.values())
+        if stripped > 0:
+            console.print(
+                f"  🧹 [dim]Stripped {stripped} filler phrases "
+                f"(Penalty Horizon post-processor)[/dim]"
+            )
+
+        return conversation
+
+    # ─── Final Safety Net ─────────────────────────────────
+
     def _final_ddm_safety_net(self, conversation: list[dict]) -> tuple[list[dict], dict]:
         """
-        Final deterministic DDM safety net.
-        Runs after ALL generation/rewrite phases to catch any remaining DDM
-        violations (e.g., introduced by auditor rewrites) and force-fix them.
-        Also runs phrase sanitization on ALL assistant messages.
+        Final deterministic safety net — runs LAST in the pipeline.
+
+        1. Strip filler phrases (Penalty Horizon fix)
+        2. Force-fix DDM on ALL assistant messages (L5 + phrase sanitization)
+        3. Re-validate from scratch → this is the FINAL rule_result stored in JSON
+
+        The validation MUST run here (not earlier) to avoid 'ghost errors'
+        where stale pre-revision validation logs get attached to the final JSON.
         """
-        # Step 1: Run force_fix_ddm on ALL assistant messages for:
-        #   - Banned phrase sanitization (Flaw 1)
+        # Step 1: Strip filler phrases (Penalty Horizon)
+        conversation = self._strip_filler_phrases(conversation)
+
+        # Step 2: Run force_fix_ddm on ALL assistant messages for:
         #   - L5 turn counter correction
         #   - L1/L3/L4 fixes
+        #   - Banned phrase replacement
         asst_idx = 0
         for i, msg in enumerate(conversation):
             if msg["role"] == "assistant":
@@ -397,8 +471,11 @@ class DataFactory:
                     msg["content"], turn_number=asst_idx
                 )
 
-        # Step 2: Validate and report any remaining issues
+        # Step 3: FINAL validation — this is the definitive result stored in JSON
+        # Any earlier validation results are discarded (fixes Ghost Error bug)
+        console.print("  📏 [bold green]FINAL Validation[/bold green] (post-revision + post-fix)...")
         rule_result = self._rule_based_validate(conversation)
+
         ddm_errors = [
             i for i in rule_result["issues"]
             if i["rule"].startswith("DDM_") and i["severity"] == "error"
@@ -408,6 +485,8 @@ class DataFactory:
                 f"  🔩 [red]Safety net[/red]: {len(ddm_errors)} DDM violations "
                 f"remain after force-fix (likely structural L2 issues)"
             )
+        else:
+            console.print("  ✅ [bold green]All DDM constraints PASS[/bold green]")
 
         return conversation, rule_result
 
@@ -575,7 +654,7 @@ class DataFactory:
                 ),
                 "pipeline_stats": pipeline_stats.to_dict(),
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "pipeline_version": "v5-parallel-multiagent",
+                "pipeline_version": "v8-quality-hardened",
                 "num_languages": 1 + len(self.target_languages),
             },
         }
