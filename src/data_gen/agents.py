@@ -1161,8 +1161,11 @@ Return ONLY the response text."""
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement_fn(), content, count=1)
 
-        # L5: Ensure [Turn: N] at the beginning
-        if turn_number is not None and not re.match(r'^\s*\[Turn:\s*\d+\]', content):
+        # L5: Ensure correct [Turn: N] at the beginning
+        # Must REPLACE wrong turn numbers, not just add missing ones
+        if turn_number is not None:
+            # Strip any existing [Turn: X] tag (may be wrong)
+            content = re.sub(r'^\s*\[Turn:\s*\d+\]\s*', '', content)
             content = f"[Turn: {turn_number}] " + content.lstrip()
 
         # L1: Ensure [SYS_ACK: ACTIVE] at the end
